@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CORSC | Cardio-Oncology Risk & Surveillance Centre",
-  description: "Clinical decision-support dashboard for cardio-oncology surveillance.",
+  title: "CORSC | Cardiac Oncology Risk Surveillance and Care",
+  description: "Clinical decision-support workflow for cardio-oncology risk stratification, surveillance and outpatient documentation.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -1,8 +1,25 @@
 ## CORSC
 
-Cardio-Oncology Risk Stratification and Care is a browser-based clinical decision-support dashboard for structured cardio-oncology assessments, risk stratification, surveillance planning, and visit documentation.
+**Cardiac Oncology Risk Surveillance and Care** is a browser-based clinical decision-support system for cardio-oncology outpatient work: risk stratification, surveillance planning, and structured encounter documentation.
 
-Patient records are stored only in the current browser's local storage. This prototype does not include authentication, server-side persistence, or a production clinical data integration.
+The whole encounter is a single continuous workflow rather than a set of separate pages:
+
+1. Patient registration
+2. First OPD review
+3. History
+4. Vitals
+5. Symptoms
+6. Systemic examination
+7. Investigations
+8. Medication review
+9. Risk assessment
+10. Surveillance and HFA-ICOS
+11. Follow-up planner
+12. Overview, clinical summary and print
+
+Sections collapse as they are completed, irrelevant fields stay hidden, and every edit is autosaved. A clinical assistant panel runs alongside the workflow summarising risks, abnormal findings, documentation gaps and next actions. Printing is available only from the Overview section and produces a full OPD-style report.
+
+Patient records are stored in the current browser's local storage and never leave the device. Sign-in is handled by Supabase; there is no server-side clinical persistence in this build.
 
 ## Development
 
