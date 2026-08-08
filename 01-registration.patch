@@ -1,0 +1,66 @@
+diff --git a/app/page.jsx b/app/page.jsx
+index e894e25..6dc1ec3 100644
+--- a/app/page.jsx
++++ b/app/page.jsx
+@@ -269,6 +269,10 @@ function newVisit(type) {
+     cycle: cycleMatch ? Number(cycleMatch[1]) : null,
+     date: new Date().toISOString().slice(0, 10),
+     symptoms: [],
++    symptomDetails: {},
++    history: { cancer: "", cardiovascular: "", riskFactors: "", family: "", lifestyle: "", medications: "", priorTreatment: "" },
++    vitals: { height: "", weight: "", bp: "", pulse: "", temperature: "", rr: "", spo2: "" },
++    systemExam: { CVS: { status: "normal", inspection: "", palpation: "", percussion: "", auscultation: "" }, RS: { status: "normal", inspection: "", palpation: "", percussion: "", auscultation: "" }, "P/A": { status: "normal", inspection: "", palpation: "", percussion: "", auscultation: "" }, CNS: { status: "normal", inspection: "", palpation: "", percussion: "", auscultation: "" } },
+     exam: emptyExam(),
+     inv: emptyInv(),
+     medReview: "",
+@@ -463,7 +467,7 @@ function Checkbox({ checked, onChange, label, points }) {
+ 
+ function NewPatientForm({ onCancel, onCreate }) {
+   const [name, setName] = useState("");
+-  const [uhid, setUhid] = useState("");
++  const [patientId, setPatientId] = useState("");
+   const [age, setAge] = useState("");
+   const [gender, setGender] = useState("Male");
+   const [diagnosis, setDiagnosis] = useState("");
+@@ -475,6 +479,9 @@ function NewPatientForm({ onCancel, onCreate }) {
+   const [m2, setM2] = useState({});
+   const [m1, setM1] = useState({});
+   const [lvef, setLvef] = useState("");
++  const [plannedCycles, setPlannedCycles] = useState("6");
++  const [frequency, setFrequency] = useState("Every 3 weeks");
++  const [totalDose, setTotalDose] = useState("");
+ 
+   useEffect(() => {
+     const v = parseFloat(lvef);
+@@ -505,8 +512,8 @@ function NewPatientForm({ onCancel, onCreate }) {
+     if (!canRegister) return;
+     onCreate({
+       id: `p_${Date.now()}`,
+-      name, uhid, age, gender, diagnosis, stage, regimen,
+-      therapy, veryHigh: vh, high: h, m2, m1, baselineLVEF: lvef,
++      name, uhid: patientId, patientId, age, gender, diagnosis, stage, regimen,
++      plannedCycles, frequency, totalDose, therapy, veryHigh: vh, high: h, m2, m1, baselineLVEF: lvef,
+       risk, cycle: 0, clinicalStatus: "Stable",
+       registeredDate: new Date().toISOString().slice(0, 10),
+       visits: [], contraindications: { absolute: {}, relative: {} },
+@@ -520,7 +527,7 @@ function NewPatientForm({ onCancel, onCreate }) {
+       <div className="px-4 -mt-2">
+         <Section title="Demographics" icon={Users}>
+           <TextField label="Full name" value={name} onChange={setName} />
+-          <TextField label="UHID" value={uhid} onChange={setUhid} />
++          <TextField label="Patient ID" value={patientId} onChange={setPatientId} />
+           <TextField label="Age" value={age} onChange={setAge} type="number" />
+           <div className="mb-3">
+             <label className="block text-xs font-medium text-slate-500 mb-1">Gender</label>
+@@ -535,6 +542,11 @@ function NewPatientForm({ onCancel, onCreate }) {
+             onStageChange={setStage}
+           />
+           <TextField label="Chemotherapy regimen" value={regimen} onChange={setRegimen} placeholder="e.g. AC-T with trastuzumab" />
++          <div className="grid grid-cols-2 gap-2">
++            <TextField label="Planned cycles" value={plannedCycles} onChange={setPlannedCycles} type="number" />
++            <div><label className="block text-xs font-medium text-slate-500 mb-1">Frequency</label><select value={frequency} onChange={(e) => setFrequency(e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-[15px] bg-white"><option>Every 2 weeks</option><option>Every 3 weeks</option><option>Every 4 weeks</option><option>Weekly</option><option>Other</option></select></div>
++          </div>
++          <TextField label="Total planned chemotherapy dose" value={totalDose} onChange={setTotalDose} placeholder="e.g. doxorubicin 300 mg/m²" />
+         </Section>
+ 
+         <Section title="1 Planned anticancer therapy" icon={Syringe}>
