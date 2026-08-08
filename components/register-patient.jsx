@@ -41,11 +41,13 @@ export function RegisterPatient({ onCancel, onCreate }) {
             >
               <ArrowLeft size={16} aria-hidden="true" />
             </button>
-            <div className="flex size-7 items-center justify-center rounded-lg bg-teal-500">
-              <Heart size={13} className="text-white" fill="white" aria-hidden="true" />
+            <div className="flex size-7 items-center justify-center rounded-lg">
+              <img
+          src=" /corsc-icon.png"
+           alt="CORSC"
+          CLASSName=:"w-full h-full object-cover rounded-1g"
+               />
             </div>
-            <span className="text-[13px] font-semibold tracking-wide text-white/90">{APP_NAME}</span>
-          </div>
           <h1 className="text-[24px] font-bold leading-tight" style={serif}>Register new patient</h1>
           <p className="mt-1 text-[13px] text-white/70">
             Identity, diagnosis, planned course and baseline HFA-ICOS stratification.
