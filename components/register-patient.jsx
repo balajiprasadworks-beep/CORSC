@@ -8,11 +8,10 @@
    ========================================================================= */
 
 import { useState } from "react";
-import { ArrowLeft, ArrowRight, Heart } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 
 import { RegistrationFields, applyRegistrationChange } from "@/components/sections/registration";
 import { serif } from "@/components/kit";
-import { APP_NAME } from "@/lib/clinical-data";
 import { createEncounter, createPatient, todayISO } from "@/lib/patient-model";
 
 export function RegisterPatient({ onCancel, onCreate }) {
@@ -43,20 +42,28 @@ export function RegisterPatient({ onCancel, onCreate }) {
             </button>
             <div className="flex size-7 items-center justify-center rounded-lg">
               <img
-          src=" /corsc-icon.png"
-           alt="CORSC"
-          CLASSName=:"w-full h-full object-cover rounded-1g"
-               />
+                src="/corsc-icon.png"
+                alt="CORSC"
+                className="w-full h-full object-cover rounded-lg"
+              />
             </div>
-          <h1 className="text-[24px] font-bold leading-tight" style={serif}>Register new patient</h1>
-          <p className="mt-1 text-[13px] text-white/70">
-            Identity, diagnosis, planned course and baseline HFA-ICOS stratification.
-          </p>
+            <div>
+              <h1 className="text-[24px] font-bold leading-tight" style={serif}>
+                Register new patient
+              </h1>
+              <p className="mt-1 text-[13px] text-white/70">
+                Identity, diagnosis, planned course and baseline HFA-ICOS stratification.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
       <div className="mx-auto max-w-3xl px-4 pb-28 pt-4">
-        <RegistrationFields value={draft} onChange={(patch) => setDraft((current) => applyRegistrationChange(current, patch))} />
+        <RegistrationFields
+          value={draft}
+          onChange={(patch) => setDraft((current) => applyRegistrationChange(current, patch))}
+        />
 
         <div className="sticky bottom-0 mt-4 border-t border-slate-200 bg-[#F6F7F5] py-3">
           <button
