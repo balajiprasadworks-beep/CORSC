@@ -10,6 +10,8 @@ import { OverviewSection, PrintReport } from "@/components/sections/overview";
 import { SurveillanceSection } from "@/components/sections/surveillance";
 import { FollowUpSection } from "@/components/sections/follow-up";
 import { RegistrationFields } from "@/components/sections/registration";
+import { SinceLastVisitSection } from "@/components/sections/since-last-visit";
+import { PatientList } from "@/components/patient-list";
 import { buildClinicalPicture } from "@/lib/clinical-picture";
 import { buildSummary } from "@/lib/ai-summary";
 import { createEncounter, createPatient } from "@/lib/patient-model";
@@ -117,5 +119,83 @@ describe("component smoke render", () => {
 
     const report = render(<PrintReport patient={patient} encounter={encounter} picture={picture} summary={summary} />);
     expect(report).toContain("Fitness to proceed");
+  });
+});
+
+/* =========================================================================
+   The surfaces added by the clinical upgrade.
+
+   These are server-render checks, not behaviour tests — the engines are tested
+   directly beside their modules. What this catches is a section that throws, or
+   one that silently stops showing a clinically load-bearing string such as the
+   provenance of a risk category.
+   ========================================================================= */
+
+describe("clinical upgrade surfaces", () => {
+  it("renders the interval history section", () => {
+    const html = render(<SinceLastVisitSection encounter={encounter} setEncounter={noop} picture={picture} />);
+    expect(html).toContain("Cardiovascular symptoms");
+    expect(html).toContain("Hospital admission");
+  });
+
+  it("shows both risk axes, labelled differently", () => {
+    const html = render(
+      <RiskSection patient={patient} setPatient={noop} encounter={encounter} setEncounter={noop} picture={picture} />
+    );
+    expect(html).toContain("Baseline cardiovascular risk");
+    expect(html).toContain("Current cardiovascular status");
+    // The management level is named as such, so it cannot be read as a
+    // baseline HFA-ICOS category.
+    expect(html).toContain("Management level");
+  });
+
+  it("shows the provenance of the baseline category on screen, not behind a tooltip", () => {
+    const html = render(
+      <RiskSection patient={patient} setPatient={noop} encounter={encounter} setEncounter={noop} picture={picture} />
+    );
+    expect(html).toContain("HFA-ICOS 2020");
+  });
+
+  it("shows the arithmetic that produced the category", () => {
+    const html = render(
+      <RiskSection patient={patient} setPatient={noop} encounter={encounter} setEncounter={noop} picture={picture} />
+    );
+    expect(html).toContain("Moderate-risk total");
+    expect(html).toContain("Applied rule");
+  });
+
+  it("renders the worklist with its filters", () => {
+    const html = render(<PatientList patients={[patient]} onSelect={noop} onNew={noop} />);
+    expect(html).toContain("Overdue");
+    expect(html).toContain("Biomarker abnormal");
+    expect(html).toContain("Test patient");
+  });
+
+  it("puts the provenance appendix and the rules version in the printed report", () => {
+    const html = render(<PrintReport patient={patient} encounter={encounter} picture={picture} summary={summary} />);
+    expect(html).toContain("Clinical sources and provenance");
+    expect(html).toContain("CORSC rules version");
+    expect(html).toContain("Lyon AR");
+  });
+
+  it("reports baseline risk and current toxicity as separate blocks", () => {
+    const html = render(<PrintReport patient={patient} encounter={encounter} picture={picture} summary={summary} />);
+    expect(html).toContain("Baseline cardiovascular risk");
+    expect(html).toContain("Current cardiovascular status (CTR-CVT)");
+  });
+
+  it("states in the report that medication prompts are not prescriptions", () => {
+    const html = render(<PrintReport patient={patient} encounter={encounter} picture={picture} summary={summary} />);
+    expect(html).toContain("not prescriptions");
+  });
+
+  it("records in the report when nothing has been overridden", () => {
+    const html = render(<PrintReport patient={patient} encounter={encounter} picture={picture} summary={summary} />);
+    expect(html).toContain("as CORSC calculated it");
+  });
+
+  it("names the anthracycline equivalence model in the report", () => {
+    const html = render(<PrintReport patient={patient} encounter={encounter} picture={picture} summary={summary} />);
+    expect(html).toContain("Equivalence model");
   });
 });

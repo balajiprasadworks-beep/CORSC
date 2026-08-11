@@ -23,6 +23,7 @@ import { MedicationSection, MEDICATION_ICON } from "@/components/sections/medica
 import { OverviewSection, PrintReport, OVERVIEW_ICON } from "@/components/sections/overview";
 import { RegistrationSection, REGISTRATION_ICON } from "@/components/sections/registration";
 import { RiskSection, RISK_ICON } from "@/components/sections/risk";
+import { SinceLastVisitSection, SINCE_LAST_VISIT_ICON } from "@/components/sections/since-last-visit";
 import { SurveillanceSection, SURVEILLANCE_ICON } from "@/components/sections/surveillance";
 import { SymptomsSection, SYMPTOMS_ICON } from "@/components/sections/symptoms";
 import { ExaminationSection, EXAMINATION_ICON } from "@/components/sections/examination";
@@ -32,6 +33,7 @@ import { EXAM_SYSTEMS, HISTORY_GROUPS, INVESTIGATIONS } from "@/lib/clinical-dat
 import { buildClinicalPicture } from "@/lib/clinical-picture";
 import { buildSummary } from "@/lib/ai-summary";
 import { createEncounter, currentCycle, isFilled, latestLVEF, todayISO } from "@/lib/patient-model";
+import { sectionsForVisit } from "@/lib/visit-types";
 
 /* --------------------------------------------------------- section model */
 
@@ -72,6 +74,20 @@ function sectionDefinitions({ patient, encounter, picture }) {
       complete: Boolean(encounter.firstReview?.tolerance),
       status: encounter.firstReview?.tolerance || encounter.type,
       statusTone: encounter.firstReview?.tolerance ? "ok" : "neutral",
+    },
+    {
+      id: "since-last-visit",
+      label: "Since last visit",
+      shortLabel: "Interval",
+      icon: SINCE_LAST_VISIT_ICON,
+      subtitle: "Structured interval history — answers here feed the alert and surveillance engines",
+      complete: picture.intervalHistory.answered,
+      status: picture.intervalHistory.positive.length
+        ? `${picture.intervalHistory.positive.length} positive`
+        : picture.intervalHistory.answered
+          ? "Nothing reported"
+          : "Not taken",
+      statusTone: picture.intervalHistory.requiresReview ? "danger" : picture.intervalHistory.answered ? "ok" : "warning",
     },
     {
       id: "history",
@@ -249,7 +265,14 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
 
   const picture = useMemo(() => buildClinicalPicture(patient, encounter), [patient, encounter]);
   const summary = useMemo(() => buildSummary(picture), [picture]);
-  const sections = useMemo(() => sectionDefinitions({ patient, encounter, picture }), [patient, encounter, picture]);
+  /* Only the sections this visit type calls for. A twelve-month survivorship
+     review has no treatment tolerance and no current cycle, and a baseline
+     assessment has no interval to report on — showing those sections invites
+     documentation that means nothing and buries the sections that matter. */
+  const sections = useMemo(
+    () => sectionsForVisit(encounter, sectionDefinitions({ patient, encounter, picture })),
+    [patient, encounter, picture]
+  );
 
   /* Track which section is in view so the header nav reflects position. */
   useEffect(() => {
@@ -340,6 +363,8 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
         return <RegistrationSection patient={patient} setPatient={setPatient} />;
       case "first-review":
         return <FirstReviewSection patient={patient} setPatient={setPatient} encounter={encounter} setEncounter={setEncounter} />;
+      case "since-last-visit":
+        return <SinceLastVisitSection encounter={encounter} setEncounter={setEncounter} picture={picture} />;
       case "history":
         return <HistorySection patient={patient} setPatient={setPatient} />;
       case "vitals":

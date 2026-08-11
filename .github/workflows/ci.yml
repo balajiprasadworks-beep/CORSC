@@ -1,0 +1,72 @@
+name: CI
+
+# CORSC is clinical decision support, so the clinical engine tests are treated
+# as a release gate rather than as advisory. They run in their own job, before
+# anything else, so a broken risk calculation fails fast and visibly rather than
+# being buried under a lint report.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  clinical-engines:
+    name: Clinical engine tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The HFA-ICOS validation suite states the expected published result for
+      # each synthetic patient independently of the implementation. A failure
+      # here means the application is scoring patients differently from the
+      # published tool, which is a release blocker.
+      - name: HFA-ICOS baseline risk validation
+        run: npx vitest run lib/hfa-icos.test.js
+
+      - name: Remaining clinical engine tests
+        run: npx vitest run
+
+  checks:
+    name: Lint, types and build
+    runs-on: ubuntu-latest
+    needs: clinical-engines
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # `next build` type-checks the project, and generates the route types that
+      # a standalone tsc invocation needs, so the build is the typecheck.
+      - name: Build
+        run: npm run build
+        env:
+          # Placeholder values: the build must not depend on real credentials,
+          # and CI must never be given any.
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-placeholder-not-a-secret
