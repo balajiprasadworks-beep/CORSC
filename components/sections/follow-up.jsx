@@ -23,7 +23,8 @@ import {
   TextArea,
   mono,
 } from "@/components/kit";
-import { DRUG_DB, FOLLOW_UP_DAYS, primaryTherapy, riskStyle } from "@/lib/clinical-data";
+import { DRUG_DB, FOLLOW_UP_DAYS, riskStyle } from "@/lib/clinical-data";
+import { therapyList } from "@/lib/hfa-icos";
 import { investigationLabel, milestoneRequirements } from "@/lib/investigation-timeline";
 import { num } from "@/lib/vitals";
 
@@ -57,8 +58,8 @@ function addDays(iso, days) {
 export function FollowUpSection({ patient, encounter, setEncounter, picture }) {
   const { nextFollowUp, currentRisk } = picture;
   const styles = riskStyle(currentRisk);
-  const therapy = primaryTherapy(patient.therapy);
-  const drug = DRUG_DB[therapy];
+  const therapies = therapyList(patient.therapy);
+  const drugRedFlags = therapies.flatMap((id) => DRUG_DB[id]?.redFlags || []);
 
   const milestones = useMemo(() => {
     const currentCycle = num(encounter.firstReview?.cycle) ?? num(encounter.cycle) ?? num(patient.cycle) ?? 0;
@@ -139,7 +140,7 @@ export function FollowUpSection({ patient, encounter, setEncounter, picture }) {
     });
   }, [patient, encounter, nextFollowUp.date]);
 
-  const triggers = [...GENERIC_TRIGGERS, ...(drug?.redFlags || [])].filter(
+  const triggers = [...GENERIC_TRIGGERS, ...drugRedFlags].filter(
     (value, index, all) => all.indexOf(value) === index
   );
 

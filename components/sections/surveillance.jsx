@@ -26,20 +26,20 @@ import {
   FOLLOW_UP_DAYS,
   RELATIVE_CI,
   hasTherapy,
-  primaryTherapy,
   riskStyle,
   therapyName,
 } from "@/lib/clinical-data";
 import { STATUS_STYLES } from "@/lib/investigation-timeline";
 import { isTaskComplete } from "@/lib/surveillance-engine";
+import { therapyList } from "@/lib/hfa-icos";
 import { uid } from "@/lib/patient-model";
 
 const STATUS_TONE = { completed: "ok", due: "info", overdue: "warning", missing: "danger", pending: "neutral" };
 
 export function SurveillanceSection({ patient, setPatient, encounter, setEncounter, picture }) {
   const { tasks, tasksDone, nextFollowUp, outstanding, currentRisk, engineVisit } = picture;
-  const therapy = primaryTherapy(patient.therapy);
-  const drug = DRUG_DB[therapy];
+  const therapies = therapyList(patient.therapy);
+  const drugs = therapies.map((id) => ({ id, drug: DRUG_DB[id] })).filter((item) => item.drug);
   const styles = riskStyle(currentRisk);
   const contraindications = patient.contraindications || { absolute: {}, relative: {} };
 
@@ -90,7 +90,7 @@ export function SurveillanceSection({ patient, setPatient, encounter, setEncount
       <Grid cols="sm:grid-cols-3">
         <MetricTile label="Tasks complete" value={`${tasksDone}/${tasks.length}`} caption="Generated for this encounter" tone={tasksDone === tasks.length ? "ok" : "info"} />
         <MetricTile label="Review interval" value={FOLLOW_UP_DAYS[currentRisk]} unit="days" caption={`${currentRisk} risk category`} />
-        <MetricTile label="Next contact" value={nextFollowUp.date} caption={nextFollowUp.reason} tone={nextFollowUp.days <= 7 ? "warning" : undefined} />
+        <MetricTile label="Next contact" value={nextFollowUp.date} caption={`${nextFollowUp.label} — ${nextFollowUp.reason}`} tone={nextFollowUp.tone} />
       </Grid>
 
       {urgentTasks.length > 0 && (
@@ -164,7 +164,14 @@ export function SurveillanceSection({ patient, setPatient, encounter, setEncount
         </Callout>
       )}
 
-      <Panel title={`Guideline monitoring — ${therapyName(therapy)}`} subtitle="Baseline, on-treatment and post-treatment requirements">
+      {drugs.length === 0 && (
+        <Panel title="Guideline monitoring">
+          <EmptyState>Select a planned anticancer therapy in registration to load its monitoring protocol.</EmptyState>
+        </Panel>
+      )}
+
+      {drugs.map(({ id, drug }) => (
+      <Panel key={id} title={`Guideline monitoring — ${therapyName(id)}`} subtitle="Baseline, on-treatment and post-treatment requirements">
         {drug ? (
           <Grid cols="lg:grid-cols-3">
             {[
@@ -181,9 +188,10 @@ export function SurveillanceSection({ patient, setPatient, encounter, setEncount
             ))}
           </Grid>
         ) : (
-          <EmptyState>Select a planned anticancer therapy in registration to load its monitoring protocol.</EmptyState>
+          <EmptyState>No monitoring protocol is held for this therapy class.</EmptyState>
         )}
       </Panel>
+      ))}
 
       <Panel title="Risk-linked surveillance adjustment" tone="neutral">
         <div className={`rounded-xl border p-3 ${styles.bg} ${styles.border}`}>

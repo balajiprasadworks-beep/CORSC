@@ -8,7 +8,7 @@
    a resolved status for every scheduled test.
    ========================================================================= */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Activity, ChevronDown, Plus } from "lucide-react";
 
 import {
@@ -25,13 +25,87 @@ import {
   TextField,
   mono,
 } from "@/components/kit";
+import {
+  RHYTHM_OPTIONS,
+  interpretECG,
+  interpretNatriuretic,
+  interpretTroponin,
+} from "@/lib/cardiac-measurements";
 import { INTERPRETATION_OPTIONS, INVESTIGATIONS } from "@/lib/clinical-data";
 import { STATUS_STYLES } from "@/lib/investigation-timeline";
 
 const STATUS_TONE = { completed: "ok", due: "info", overdue: "warning", missing: "danger", pending: "neutral" };
 
-function InvestigationRow({ definition, value, onChange, reason }) {
+/**
+ * Live interpretation of a structured result against the patient's own
+ * reference limits, shown as it is typed so the clinician sees the machine's
+ * reading rather than having to supply it.
+ */
+function AutoInterpretation({ definition, value, patient }) {
+  const reading = useMemo(() => {
+    if (definition.id === "troponin") {
+      return interpretTroponin({
+        value: value.result,
+        baseline: patient?.baselineTroponin,
+        assayId: patient?.troponinAssay,
+        sex: patient?.gender,
+        localURL: patient?.troponinURL,
+      });
+    }
+    if (definition.id === "ntprobnp") {
+      return interpretNatriuretic({ value: value.result, baseline: patient?.baselineNtProBnp, age: patient?.age });
+    }
+    if (definition.id === "ecg") {
+      const ecg = interpretECG({ ecg: value.measurements || {}, sex: patient?.gender, baselineQtc: patient?.baselineQTc });
+      return ecg.recorded ? ecg : null;
+    }
+    return null;
+  }, [definition.id, value.result, value.measurements, patient]);
+
+  if (!reading?.recorded) return null;
+
+  return (
+    <div className="mt-2">
+      <Callout tone={reading.tone} title={reading.label}>
+        {reading.detail || (reading.reasons || []).join(" ")}
+        {definition.id === "ecg" && reading.source === "Fridericia" && (
+          <span className="mt-1 block text-[12px] italic text-slate-500">
+            Corrected by Fridericia from the entered interval and rate.
+          </span>
+        )}
+      </Callout>
+    </div>
+  );
+}
+
+/** Structured ECG entry: the intervals the QT rules actually need. */
+function EcgMeasurements({ value, onChange }) {
+  const measurements = value.measurements || {};
+  const set = (patch) => onChange({ measurements: { ...measurements, ...patch } });
+
+  return (
+    <Grid cols="sm:grid-cols-2 lg:grid-cols-4">
+      <TextField label="Rate" value={measurements.rate} onChange={(v) => set({ rate: v })} type="number" unit="bpm" placeholder="72" />
+      <SelectField label="Rhythm" value={measurements.rhythm} onChange={(v) => set({ rhythm: v })} options={RHYTHM_OPTIONS} placeholder="Select rhythm" />
+      <TextField label="QT" value={measurements.qt} onChange={(v) => set({ qt: v })} type="number" unit="ms" placeholder="400" />
+      <TextField
+        label="QTc"
+        value={measurements.qtc}
+        onChange={(v) => set({ qtc: v })}
+        type="number"
+        unit="ms"
+        placeholder="Auto"
+        hint="Leave blank to derive from QT and rate."
+      />
+    </Grid>
+  );
+}
+
+function InvestigationRow({ definition, value, onChange, reason, patient }) {
   const abnormal = value.interp && value.interp !== "Normal";
+  const isNumeric = definition.entry === "numeric";
+  const isEcg = definition.entry === "ecg";
+
   return (
     <div className={`rounded-xl border p-3 ${abnormal ? "border-red-200 bg-red-50/40" : "border-slate-200 bg-white"}`}>
       <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
@@ -41,22 +115,31 @@ function InvestigationRow({ definition, value, onChange, reason }) {
         </div>
         {abnormal && <StatusChip tone="danger">{value.interp}</StatusChip>}
       </div>
-      <Grid cols="sm:grid-cols-2">
-        <TextField
-          label="Result"
-          value={value.result}
-          onChange={(v) => onChange({ result: v })}
-          unit={definition.unit || undefined}
-          placeholder={definition.unit ? "Value" : "Finding"}
-        />
-        <SelectField
-          label="Interpretation"
-          value={value.interp}
-          onChange={(v) => onChange({ interp: v })}
-          options={INTERPRETATION_OPTIONS}
-          placeholder="Not interpreted"
-        />
-      </Grid>
+
+      {isEcg && <EcgMeasurements value={value} onChange={onChange} />}
+
+      <div className={isEcg ? "mt-3" : ""}>
+        <Grid cols="sm:grid-cols-2">
+          <TextField
+            label={isEcg ? "Narrative finding" : "Result"}
+            value={value.result}
+            onChange={(v) => onChange({ result: v })}
+            type={isNumeric ? "number" : "text"}
+            unit={isNumeric ? definition.unit || undefined : undefined}
+            placeholder={isNumeric ? "Value" : "Finding"}
+          />
+          <SelectField
+            label="Interpretation"
+            value={value.interp}
+            onChange={(v) => onChange({ interp: v })}
+            options={INTERPRETATION_OPTIONS}
+            placeholder={isNumeric || isEcg ? "Interpreted automatically" : "Not interpreted"}
+          />
+        </Grid>
+      </div>
+
+      <AutoInterpretation definition={definition} value={value} patient={patient} />
+
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <TextField label="Date performed" type="date" value={value.date} onChange={(v) => onChange({ date: v })} />
         <TextField label="Consultant comment" value={value.comment} onChange={(v) => onChange({ comment: v })} placeholder="Interpretation in context" />
@@ -100,6 +183,7 @@ function TrendCard({ series }) {
 }
 
 export function InvestigationsSection({ picture, encounter, setEncounter }) {
+  const patient = picture.patient;
   const [showAll, setShowAll] = useState(false);
   // Investigations added by hand this session, before any value is entered.
   const [addedIds, setAddedIds] = useState(() => new Set());
@@ -156,6 +240,7 @@ export function InvestigationsSection({ picture, encounter, setEncounter }) {
                   key={item.id}
                   definition={definition}
                   reason={item.reason}
+                  patient={patient}
                   value={encounter.inv?.[item.id] || { result: "", interp: "", date: "", comment: "" }}
                   onChange={(patch) => setInv(item.id, patch)}
                 />
@@ -172,6 +257,7 @@ export function InvestigationsSection({ picture, encounter, setEncounter }) {
               <InvestigationRow
                 key={definition.id}
                 definition={definition}
+                patient={patient}
                 value={encounter.inv?.[definition.id] || { result: "", interp: "", date: "", comment: "" }}
                 onChange={(patch) => setInv(definition.id, patch)}
               />
