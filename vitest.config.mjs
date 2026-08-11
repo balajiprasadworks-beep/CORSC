@@ -7,6 +7,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["lib/**/*.test.js"],
+    // Engine tests live beside the modules; the smoke test server-renders the
+    // sections, because `next build` type-checks the components but never runs
+    // them.
+    include: ["lib/**/*.test.js", "smoke/**/*.test.jsx"],
   },
 });
