@@ -9,7 +9,7 @@
    ========================================================================= */
 
 import { useMemo } from "react";
-import { Activity, AlertTriangle, ClipboardList, ShieldAlert, Syringe, Users } from "lucide-react";
+import { Activity, AlertTriangle, Check, ClipboardList, ShieldAlert, Syringe, Users } from "lucide-react";
 
 import { DiagnosisStageSelector } from "@/components/diagnosis-stage-selector";
 import {
@@ -27,60 +27,66 @@ import {
   TextField,
   serif,
 } from "@/components/kit";
-import {
-  CYCLE_FREQUENCIES,
-  HIGH_FACTORS,
-  MODERATE1_FACTORS,
-  MODERATE2_FACTORS,
-  THERAPY_CLASSES,
-  VERY_HIGH_FACTORS,
-  calcRisk,
-  riskStyle,
-} from "@/lib/clinical-data";
+import { CYCLE_FREQUENCIES, THERAPY_CLASSES, riskStyle } from "@/lib/clinical-data";
+import { TROPONIN_ASSAYS } from "@/lib/cardiac-measurements";
+import { TIERS, assessRisk, factorsByTier, therapyList } from "@/lib/hfa-icos";
 import { num } from "@/lib/vitals";
 
 /**
- * Age and baseline LVEF determine four HFA-ICOS factors outright. Deriving
- * them on change keeps the checklist and the entered values consistent without
- * an effect that fights the clinician.
+ * Recomputes the risk category after any change.
+ *
+ * Factors that follow from age, baseline LVEF or the recorded history are no
+ * longer copied into the checkbox groups. They are derived at assessment time
+ * instead, which keeps one source of truth and stops the derived ticks from
+ * fighting the clinician's own.
  */
-export function deriveAutoFactors(draft) {
-  const age = num(draft.age);
-  const lvef = num(draft.baselineLVEF);
-  const high = { ...(draft.high || {}) };
-  const m2 = { ...(draft.m2 || {}) };
-
-  if (lvef !== null) {
-    high.h1 = lvef < 50;
-    m2.m2a = lvef >= 50 && lvef <= 54;
-  }
-  if (age !== null) {
-    high.h3 = age >= 80;
-    m2.m2b = age >= 65 && age < 80;
-  }
-  return { high, m2 };
-}
-
 export function applyRegistrationChange(draft, patch) {
   const next = { ...draft, ...patch };
-  if ("age" in patch || "baselineLVEF" in patch) {
-    Object.assign(next, deriveAutoFactors(next));
-  }
-  next.risk = calcRisk(next.veryHigh, next.high, next.m2, next.m1);
+  next.risk = assessRisk(next);
   return next;
 }
 
 /* ------------------------------------------------------------------ form */
 
 export function RegistrationFields({ value, onChange, showRiskPreview = true }) {
-  const risk = useMemo(
-    () => value.risk || calcRisk(value.veryHigh, value.high, value.m2, value.m1),
-    [value.risk, value.veryHigh, value.high, value.m2, value.m1]
+  const risk = useMemo(() => assessRisk(value), [value]);
+  const tiers = useMemo(() => factorsByTier(value.therapy), [value.therapy]);
+  const derivedById = useMemo(
+    () => Object.fromEntries(risk.factors.map((factor) => [factor.id, factor])),
+    [risk.factors]
   );
   const styles = riskStyle(risk.category);
   const set = (patch) => onChange(patch);
   const toggle = (group, id) =>
     set({ [group]: { ...(value[group] || {}), [id]: !(value[group] || {})[id] } });
+
+  const selectedTherapies = therapyList(value.therapy);
+  function toggleTherapy(id) {
+    const next = selectedTherapies.includes(id)
+      ? selectedTherapies.filter((therapy) => therapy !== id)
+      : [...selectedTherapies, id];
+    set({ therapy: next });
+  }
+
+  /** Renders one tier of the proforma, showing where each factor came from. */
+  const renderTier = (factors) =>
+    factors.map((factor) => {
+      const resolved = derivedById[factor.id];
+      const auto = resolved?.source === "derived";
+      return (
+        <Checkbox
+          key={factor.id}
+          label={factor.label}
+          points={TIERS[factor.tier].weight || undefined}
+          checked={Boolean(resolved?.present)}
+          hint={auto ? resolved.sourceDetail : undefined}
+          onChange={() => {
+            // Derived factors are read-only: the underlying value is the record.
+            if (!auto) toggle(TIERS[factor.tier].group, factor.id);
+          }}
+        />
+      );
+    });
 
   const plannedCycles = num(value.plannedCycles);
   const totalDose = num(value.totalPlannedDose);
@@ -158,66 +164,107 @@ export function RegistrationFields({ value, onChange, showRiskPreview = true }) 
         </Stack>
       </Panel>
 
-      <Panel title="Planned anticancer therapy" subtitle="Determines which surveillance protocol applies">
-        <div className="space-y-2" role="radiogroup" aria-label="Planned anticancer therapy">
+      <Panel
+        title="Planned anticancer therapy"
+        subtitle="Select every class the patient will receive — each contributes its own surveillance protocol"
+      >
+        <div className="space-y-2" role="group" aria-label="Planned anticancer therapy">
           {THERAPY_CLASSES.map((therapy) => {
-            const active = value.therapy === therapy.id;
+            const active = selectedTherapies.includes(therapy.id);
             return (
               <button
                 key={therapy.id}
                 type="button"
-                role="radio"
+                role="checkbox"
                 aria-checked={active}
-                onClick={() => set({ therapy: therapy.id })}
-                className={`w-full rounded-xl border px-3.5 py-3 text-left transition ${
+                onClick={() => toggleTherapy(therapy.id)}
+                className={`flex w-full gap-3 rounded-xl border px-3.5 py-3 text-left transition ${
                   active ? "border-teal-600 bg-teal-50 ring-1 ring-teal-600/20" : "border-slate-200 bg-white hover:border-teal-300"
                 }`}
               >
-                <div className="text-[14px] font-semibold text-slate-900">{therapy.name}</div>
-                <div className="mt-0.5 text-[12.5px] text-slate-500">{therapy.examples}</div>
-                <div className="mt-1 text-[12.5px] text-teal-700">{therapy.note}</div>
+                <span
+                  className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition ${
+                    active ? "border-teal-700 bg-teal-700" : "border-slate-300 bg-white"
+                  }`}
+                >
+                  {active && <Check size={13} className="text-white" strokeWidth={3} aria-hidden="true" />}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[14px] font-semibold text-slate-900">{therapy.name}</span>
+                  <span className="mt-0.5 block text-[12.5px] text-slate-500">{therapy.examples}</span>
+                  <span className="mt-1 block text-[12.5px] text-teal-700">{therapy.note}</span>
+                </span>
               </button>
             );
           })}
         </div>
+        {selectedTherapies.length > 1 && (
+          <div className="mt-3">
+            <Callout tone="info" title={`${selectedTherapies.length} therapy classes selected`}>
+              Surveillance will be the union of every applicable protocol, with the shortest interval taking precedence.
+              Sequential anthracycline and HER2-targeted exposure carries higher risk than either alone.
+            </Callout>
+          </div>
+        )}
       </Panel>
 
       <Panel title="Baseline measurements" subtitle="Anchor values every later comparison is made against">
-        <Grid>
-          <TextField label="Baseline LVEF" value={value.baselineLVEF} onChange={(v) => set({ baselineLVEF: v })} type="number" unit="%" />
-          <TextField label="Baseline weight" value={value.baselineWeight} onChange={(v) => set({ baselineWeight: v })} type="number" unit="kg" hint="Used as the reference for weight-loss tracking." />
-        </Grid>
+        <Stack>
+          <Grid>
+            <TextField label="Baseline LVEF" value={value.baselineLVEF} onChange={(v) => set({ baselineLVEF: v })} type="number" unit="%" hint="Without this, no later fall can be identified as new." />
+            <TextField label="Baseline GLS" value={value.baselineGLS} onChange={(v) => set({ baselineGLS: v })} type="number" unit="%" hint="Enter as measured, usually negative. A relative fall over 15% is significant." />
+            <TextField label="Baseline weight" value={value.baselineWeight} onChange={(v) => set({ baselineWeight: v })} type="number" unit="kg" hint="Reference for weight-loss tracking." />
+            <TextField label="Baseline QTc" value={value.baselineQTc} onChange={(v) => set({ baselineQTc: v })} type="number" unit="ms" hint="A later rise of 60 ms or more is actionable in itself." />
+          </Grid>
+          <Grid cols="sm:grid-cols-3">
+            <SelectField
+              label="Troponin assay"
+              value={TROPONIN_ASSAYS.find((a) => a.id === value.troponinAssay)?.label || ""}
+              onChange={(label) => set({ troponinAssay: TROPONIN_ASSAYS.find((a) => a.label === label)?.id || "" })}
+              options={TROPONIN_ASSAYS.map((assay) => assay.label)}
+              placeholder="Select the local assay"
+              hint="Sets the reference limit used to judge a rise."
+            />
+            <TextField label="Local upper reference limit" value={value.troponinURL} onChange={(v) => set({ troponinURL: v })} type="number" unit="ng/L" hint="Overrides the published default." />
+            <TextField label="Baseline troponin" value={value.baselineTroponin} onChange={(v) => set({ baselineTroponin: v })} type="number" unit="ng/L" />
+          </Grid>
+        </Stack>
       </Panel>
 
-      <Panel title="HFA-ICOS baseline risk factors" subtitle="Age and LVEF factors are set automatically from the values above">
+      <Panel
+        title="HFA-ICOS baseline risk factors"
+        subtitle={
+          selectedTherapies.length
+            ? "The proforma shown matches the therapies selected above"
+            : "Select a therapy above to see the matching proforma"
+        }
+      >
         <Stack gap="gap-4">
           <div>
             <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-red-600">
               <ShieldAlert size={13} aria-hidden="true" /> Very high risk
             </div>
-            {VERY_HIGH_FACTORS.map((factor) => (
-              <Checkbox key={factor.id} label={factor.label} checked={!!(value.veryHigh || {})[factor.id]} onChange={() => toggle("veryHigh", factor.id)} />
-            ))}
+            {renderTier(tiers.veryHigh)}
           </div>
           <div>
             <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-orange-600">
               <AlertTriangle size={13} aria-hidden="true" /> High risk
             </div>
-            {HIGH_FACTORS.map((factor) => (
-              <Checkbox key={factor.id} label={factor.label} checked={!!(value.high || {})[factor.id]} onChange={() => toggle("high", factor.id)} />
-            ))}
+            {renderTier(tiers.high)}
           </div>
           <div>
             <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-amber-600">
               <ClipboardList size={13} aria-hidden="true" /> Moderate risk
             </div>
-            {MODERATE2_FACTORS.map((factor) => (
-              <Checkbox key={factor.id} label={factor.label} points={2} checked={!!(value.m2 || {})[factor.id]} onChange={() => toggle("m2", factor.id)} />
-            ))}
-            {MODERATE1_FACTORS.map((factor) => (
-              <Checkbox key={factor.id} label={factor.label} points={1} checked={!!(value.m1 || {})[factor.id]} onChange={() => toggle("m1", factor.id)} />
-            ))}
+            {renderTier(tiers.moderate2)}
+            {renderTier(tiers.moderate1)}
           </div>
+          {risk.derived.length > 0 && (
+            <Callout tone="info" title={`${risk.derived.length} factor${risk.derived.length === 1 ? "" : "s"} taken from data already recorded`}>
+              These are ticked from the age, baseline measurements and history rather than by hand, so the same fact is never
+              entered twice. Change the underlying value to change the factor.
+            </Callout>
+          )}
         </Stack>
       </Panel>
 

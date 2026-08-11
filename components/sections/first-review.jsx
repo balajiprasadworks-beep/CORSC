@@ -23,7 +23,9 @@ import {
   TextArea,
   mono,
 } from "@/components/kit";
+import { AnthracyclineLedger } from "@/components/anthracycline-ledger";
 import { FIRST_REVIEW_FIELDS, SYMPTOMS, TOLERANCE_OPTIONS } from "@/lib/clinical-data";
+import { therapyList } from "@/lib/hfa-icos";
 import { num } from "@/lib/vitals";
 
 const VISIT_TYPES = [
@@ -43,8 +45,9 @@ const TOLERANCE_TONE = {
   "Treatment stopped": "danger",
 };
 
-export function FirstReviewSection({ patient, encounter, setEncounter }) {
+export function FirstReviewSection({ patient, setPatient, encounter, setEncounter }) {
   const isCycleVisit = /^(cycle|dose)/i.test(encounter.type || "");
+  const onAnthracycline = therapyList(patient.therapy).includes("anthracycline");
   const cycle = encounter.firstReview?.cycle ?? encounter.cycle ?? "";
   const plannedCycles = num(patient.plannedCycles);
 
@@ -118,6 +121,10 @@ export function FirstReviewSection({ patient, encounter, setEncounter }) {
           {!isCycleVisit && <DateField label="Review date" value={encounter.date} onChange={(v) => setEncounter((c) => ({ ...c, date: v }))} />}
         </Stack>
       </Panel>
+
+      {onAnthracycline && (
+        <AnthracyclineLedger patient={patient} setPatient={setPatient} cycle={cycle} date={encounter.date} />
+      )}
 
       <Panel title="Treatment tolerance" subtitle="How the patient has coped since the last contact">
         <div className="flex flex-wrap gap-2">

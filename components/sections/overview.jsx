@@ -28,9 +28,8 @@ import {
   EXAM_SYSTEMS,
   HISTORY_GROUPS,
   INVESTIGATIONS,
-  primaryTherapy,
   riskStyle,
-  therapyName,
+  therapyNames,
 } from "@/lib/clinical-data";
 import { medClassLabel } from "@/lib/medication-engine";
 import { systemSummaryText } from "@/lib/patient-model";
@@ -136,7 +135,7 @@ export function OverviewSection({ patient, encounter, setEncounter, picture, sum
         <Grid cols="sm:grid-cols-3">
           <KeyValue label="Diagnosis" value={patient.diagnosis} mono={false} />
           <KeyValue label="Stage" value={patient.stage} mono={false} />
-          <KeyValue label="Therapy class" value={therapyName(primaryTherapy(patient.therapy))} mono={false} />
+          <KeyValue label="Therapy class" value={therapyNames(patient.therapy)} mono={false} />
           <KeyValue label="Regimen" value={patient.regimen} mono={false} />
           <KeyValue label="Planned cycles" value={patient.plannedCycles} />
           <KeyValue label="Frequency" value={patient.cycleFrequency} mono={false} />
@@ -248,10 +247,17 @@ export function OverviewSection({ patient, encounter, setEncounter, picture, sum
           <div className="flex flex-wrap items-baseline gap-2">
             <span className={`text-xl font-bold ${styles.text}`} style={serif}>{picture.currentRisk}</span>
             <span className="text-[13px] text-slate-600">
-              baseline {patient.risk?.category} · {patient.risk?.reason}
+              baseline {picture.riskAssessment.category} · {picture.riskAssessment.reason}
             </span>
           </div>
           {picture.riskEscalation && <p className="mt-1 text-[13px] text-slate-600">Escalated because of {picture.riskEscalation}.</p>}
+        </div>
+        <div className="mt-2 rounded-xl border border-slate-200 px-3 py-2">
+          <div className="text-[11px] font-medium uppercase tracking-widest text-slate-400">Cardiac dysfunction</div>
+          <div className="mt-0.5 text-[13.5px] font-semibold text-slate-900">{picture.ctrcd.label}</div>
+          {picture.ctrcd.criteria.length > 0 && (
+            <p className="mt-0.5 text-[13px] leading-relaxed text-slate-600">{picture.ctrcd.criteria.join(". ")}.</p>
+          )}
         </div>
       </Panel>
 
@@ -374,7 +380,7 @@ export function PrintReport({ patient, encounter, picture, summary }) {
           rows={[
             ["Diagnosis", patient.diagnosis],
             ["Stage", patient.stage],
-            ["Therapy class", patient.therapy ? therapyName(primaryTherapy(patient.therapy)) : null],
+            ["Therapy class", patient.therapy ? therapyNames(patient.therapy) : null],
             ["Regimen", patient.regimen],
             ["Planned cycles", patient.plannedCycles],
             ["Frequency", patient.cycleFrequency],
@@ -447,15 +453,39 @@ export function PrintReport({ patient, encounter, picture, summary }) {
         {encounter.medReview && <p>{encounter.medReview}</p>}
       </ReportBlock>
 
+      <ReportBlock title="Fitness to proceed">
+        <p><strong>{picture.fitness.label}.</strong> {picture.fitness.headline}.</p>
+        {picture.fitness.findings.length > 0 && (
+          <ul className="report-list">
+            {picture.fitness.findings.map((finding) => (
+              <li key={finding.id}>
+                <strong>{finding.verdict === "hold" ? "Against proceeding" : "Action"}:</strong> {finding.title} — {finding.detail}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="report-empty">
+          Generated from the data recorded at this encounter. The decision to give, delay or stop cancer therapy rests with the
+          treating oncologist and cardio-oncologist together.
+        </p>
+      </ReportBlock>
+
       <ReportBlock title="Risk assessment">
         <ReportRows
           rows={[
-            ["Baseline HFA-ICOS", `${patient.risk?.category} — ${patient.risk?.reason}`],
+            ["Baseline HFA-ICOS", `${picture.riskAssessment.category} — ${picture.riskAssessment.reason}`],
             ["Current risk", picture.currentRisk],
             ["Escalation", picture.riskEscalation],
+            ["Cardiac dysfunction", picture.ctrcd.label],
             ["Baseline LVEF", patient.baselineLVEF ? `${patient.baselineLVEF}%` : null],
+            ["Cumulative anthracycline", picture.ledger.total ? `${picture.ledger.total} mg/m² doxorubicin-equivalent` : null],
           ]}
         />
+        {picture.ctrcd.criteria.length > 0 && (
+          <ul className="report-list">
+            {picture.ctrcd.criteria.map((criterion) => <li key={criterion}>{criterion}</li>)}
+          </ul>
+        )}
       </ReportBlock>
 
       <ReportBlock title="Surveillance and follow-up">

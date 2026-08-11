@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, CheckCircle2, Save, Sparkles, X } from "lucide-react";
 
 import { AiAssistant, AssistantBanner } from "@/components/ai-assistant";
+import { FitnessBanner } from "@/components/fitness-banner";
 import { StickyPatientHeader } from "@/components/sticky-header";
 import { PatientTimeline, TIMELINE_ICON } from "@/components/patient-timeline";
 import { Callout, StatusChip, WorkflowSection } from "@/components/kit";
@@ -338,7 +339,7 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
       case "registration":
         return <RegistrationSection patient={patient} setPatient={setPatient} />;
       case "first-review":
-        return <FirstReviewSection patient={patient} encounter={encounter} setEncounter={setEncounter} />;
+        return <FirstReviewSection patient={patient} setPatient={setPatient} encounter={encounter} setEncounter={setEncounter} />;
       case "history":
         return <HistorySection patient={patient} setPatient={setPatient} />;
       case "vitals":
@@ -352,7 +353,7 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
       case "medication":
         return <MedicationSection patient={patient} setPatient={setPatient} encounter={encounter} setEncounter={setEncounter} picture={picture} />;
       case "risk":
-        return <RiskSection patient={patient} setPatient={setPatient} picture={picture} />;
+        return <RiskSection patient={patient} setPatient={setPatient} encounter={encounter} setEncounter={setEncounter} picture={picture} />;
       case "surveillance":
         return <SurveillanceSection patient={patient} setPatient={setPatient} encounter={encounter} setEncounter={setEncounter} picture={picture} />;
       case "follow-up":
@@ -428,6 +429,8 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
 
           <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start lg:gap-5">
             <div className="space-y-3">
+              <FitnessBanner fitness={picture.fitness} onJump={jumpTo} />
+
               <div className="lg:hidden">
                 <AssistantBanner summary={summary} onOpen={() => setAssistantOpen(true)} />
               </div>

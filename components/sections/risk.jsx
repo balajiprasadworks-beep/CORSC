@@ -22,13 +22,8 @@ import {
   TextField,
   serif,
 } from "@/components/kit";
-import {
-  ALL_RISK_FACTORS,
-  RISK_MONITORING_PLAN,
-  primaryTherapy,
-  riskStyle,
-  therapyName,
-} from "@/lib/clinical-data";
+import { RISK_MONITORING_PLAN, riskStyle, therapyNames } from "@/lib/clinical-data";
+import { HF_STATUS_OPTIONS } from "@/lib/ctrcd";
 
 const BASELINE_REQUIREMENTS = [
   { id: "baselineLVEF", label: "Baseline LVEF", get: (p) => p.baselineLVEF, why: "Every later ejection-fraction comparison is made against it." },
@@ -38,16 +33,12 @@ const BASELINE_REQUIREMENTS = [
   { id: "age", label: "Age", get: (p) => p.age, why: "Age bands contribute directly to the HFA-ICOS score." },
 ];
 
-export function RiskSection({ patient, setPatient, picture }) {
-  const baseline = patient.risk || { category: "Low", reason: "Not calculated", points: 0 };
-  const { currentRisk, riskEscalation, signals } = picture;
+export function RiskSection({ patient, setPatient, encounter, setEncounter, picture }) {
+  const { currentRisk, riskEscalation, signals, riskAssessment, ctrcd } = picture;
+  const baseline = riskAssessment;
   const baselineStyles = riskStyle(baseline.category);
   const currentStyles = riskStyle(currentRisk);
-
-  const contributing = ALL_RISK_FACTORS.filter((factor) => {
-    const groups = [patient.veryHigh, patient.high, patient.m2, patient.m1];
-    return groups.some((group) => group && group[factor.id]);
-  });
+  const contributing = riskAssessment.contributing;
 
   const missingBaseline = BASELINE_REQUIREMENTS.filter((requirement) => {
     const value = requirement.get(patient);
@@ -87,6 +78,36 @@ export function RiskSection({ patient, setPatient, picture }) {
         </div>
       </Grid>
 
+      <Panel
+        title="Graded cardiac dysfunction"
+        subtitle="ESC 2022 grading across both the severity and symptom axes"
+      >
+        <Stack gap="gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[17px] font-semibold text-slate-900" style={serif}>{ctrcd.label}</span>
+            <StatusChip tone={ctrcd.tone}>{ctrcd.symptomatic ? "Symptomatic" : "Asymptomatic"}</StatusChip>
+          </div>
+          {ctrcd.criteria.length > 0 ? (
+            <ul className="space-y-1 pl-4">
+              {ctrcd.criteria.map((criterion) => (
+                <li key={criterion} className="list-disc text-[13px] leading-relaxed text-slate-600">{criterion}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-[13px] text-slate-500">
+              No ejection fraction, strain or biomarker change meeting any dysfunction criterion has been recorded.
+            </p>
+          )}
+          {ctrcd.management.length > 0 && (
+            <Callout tone={ctrcd.tone} title="What follows from this grade">
+              <ul className="space-y-1 pl-4">
+                {ctrcd.management.map((item) => <li key={item} className="list-disc">{item}</li>)}
+              </ul>
+            </Callout>
+          )}
+        </Stack>
+      </Panel>
+
       <Panel title="Why this patient is in this category">
         <Stack gap="gap-2">
           <p className="text-[13.5px] leading-relaxed text-slate-700">
@@ -97,7 +118,11 @@ export function RiskSection({ patient, setPatient, picture }) {
                 : baseline.category === "High"
                   ? "Either a high-risk factor is present, or the moderate-risk score reached two points or more, which escalates the category to high."
                   : "A single moderate-risk point is present, which places the patient in the moderate category."}
-            {patient.therapy ? ` The planned therapy is ${therapyName(primaryTherapy(patient.therapy)).toLowerCase()}, which sets the surveillance protocol applied throughout.` : ""}
+            {picture.therapies.length
+              ? ` The planned therapy is ${therapyNames(patient.therapy).toLowerCase()}, and the proforma above matches ${
+                  picture.therapies.length > 1 ? "that combination" : "it"
+                }.`
+              : ""}
           </p>
           {riskEscalation && (
             <Callout tone="danger" title="Live escalation above baseline">
@@ -108,16 +133,24 @@ export function RiskSection({ patient, setPatient, picture }) {
         </Stack>
       </Panel>
 
-      <Panel title="Contributing risk factors" subtitle={`${contributing.length} factor${contributing.length === 1 ? "" : "s"} recorded`}>
+      <Panel
+        title="Contributing risk factors"
+        subtitle={`${contributing.length} present${baseline.derived.length ? `, ${baseline.derived.length} taken from recorded data` : ""}`}
+      >
         {contributing.length === 0 ? (
-          <EmptyState>No HFA-ICOS risk factors are currently ticked.</EmptyState>
+          <EmptyState>No HFA-ICOS risk factors are present for this patient.</EmptyState>
         ) : (
           <div className="space-y-1.5">
             {contributing.map((factor) => (
-              <div key={factor.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
-                <span className="text-[13.5px] text-slate-800">{factor.label}</span>
-                <StatusChip tone={factor.tier === "Very high" ? "danger" : factor.tier === "High" ? "warning" : "neutral"}>
-                  {factor.weight}
+              <div key={factor.id} className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
+                <span className="min-w-0">
+                  <span className="block text-[13.5px] text-slate-800">{factor.label}</span>
+                  {factor.sourceDetail && (
+                    <span className="mt-0.5 block text-[12px] text-slate-500">{factor.sourceDetail}</span>
+                  )}
+                </span>
+                <StatusChip tone={factor.tier === "veryHigh" ? "danger" : factor.tier === "high" ? "warning" : "neutral"}>
+                  {factor.weight ? `${factor.weight} point${factor.weight === 1 ? "" : "s"}` : factor.tierLabel}
                 </StatusChip>
               </div>
             ))}
@@ -166,16 +199,37 @@ export function RiskSection({ patient, setPatient, picture }) {
         </div>
       </Panel>
 
-      <Panel title="Dynamic re-stratification" subtitle="Record findings that move the patient out of the baseline category">
+      <Panel
+        title="Heart-failure symptom status"
+        subtitle="The second grading axis — the same ejection fraction means different things with and without symptoms"
+      >
+        <div className="flex flex-wrap gap-2">
+          {HF_STATUS_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setEncounter((current) => ({ ...current, hfStatus: current.hfStatus === option.id ? "" : option.id }))}
+              aria-pressed={(encounter?.hfStatus || "none") === option.id}
+              className={`rounded-xl border px-3.5 py-2 text-left text-[13px] font-medium transition ${
+                (encounter?.hfStatus || "none") === option.id
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-300 bg-white text-slate-600 hover:border-slate-400"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </Panel>
+
+      <Panel title="Dynamic re-stratification" subtitle="Findings recorded here override what the measurements alone would show">
         <Stack>
           <Grid cols="sm:grid-cols-2">
-            <TextField label="GLS relative fall from baseline" value={restrat.glsFall || ""} onChange={(v) => setRestrat("glsFall", v)} type="number" unit="%" placeholder="12" />
-            <TextField label="Current LVEF" value={restrat.currentLVEF || ""} onChange={(v) => setRestrat("currentLVEF", v)} type="number" unit="%" placeholder="46" />
+            <TextField label="GLS relative fall from baseline" value={restrat.glsFall || ""} onChange={(v) => setRestrat("glsFall", v)} type="number" unit="%" placeholder="12" hint="Leave blank to derive from the baseline and current strain values." />
+            <TextField label="Current LVEF" value={restrat.currentLVEF || ""} onChange={(v) => setRestrat("currentLVEF", v)} type="number" unit="%" placeholder="46" hint="Leave blank to use the LVEF recorded in investigations." />
           </Grid>
           <div className="rounded-lg border border-slate-100 bg-slate-50/60 px-2 py-1">
             <Checkbox label="Significant troponin rise from baseline" checked={!!restrat.troponinRise} onChange={() => setRestrat("troponinRise", !restrat.troponinRise)} />
-            <Checkbox label="Patient is symptomatic (breathlessness, oedema or fatigue)" checked={!!restrat.symptomatic} onChange={() => setRestrat("symptomatic", !restrat.symptomatic)} />
-            <Checkbox label="Symptomatic severe heart failure present" checked={!!restrat.severeHF} onChange={() => setRestrat("severeHF", !restrat.severeHF)} />
             <Checkbox label="High-grade myocarditis confirmed" checked={!!restrat.myocarditisConfirmed} onChange={() => setRestrat("myocarditisConfirmed", !restrat.myocarditisConfirmed)} />
           </div>
         </Stack>
