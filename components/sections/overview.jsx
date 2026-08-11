@@ -31,10 +31,43 @@ import {
   riskStyle,
   therapyNames,
 } from "@/lib/clinical-data";
+import { RULES_VERSION, clinicalSource } from "@/lib/clinical-sources";
 import { medClassLabel } from "@/lib/medication-engine";
 import { systemSummaryText } from "@/lib/patient-model";
 
 /* --------------------------------------------------------- report model */
+
+/**
+ * Every distinct source behind anything in this report, de-duplicated.
+ *
+ * Collected from the provenance objects the engines already attach, rather
+ * than from a hand-maintained list — a hand-maintained bibliography drifts out
+ * of step with what the software actually did.
+ */
+function reportSources(picture) {
+  const provenances = [
+    picture.baselineRisk?.provenance,
+    ...(picture.baselineRisk?.results || []).map((result) => result.provenance),
+    ...(picture.baselineRisk?.modifiers || []).map((modifier) => modifier.provenance),
+    picture.ctrCvt?.provenance,
+    ...(picture.ctrCvt?.domains || []).map((domain) => domain.provenance),
+    ...(picture.redFlags?.flags || []).map((flag) => flag.provenance),
+    ...(picture.tasks || []).map((task) => task.provenance),
+    ...(picture.series || []).map((series) => series.provenance),
+    ...(picture.recommendations || []).map((rec) => rec.provenance),
+    picture.ledger?.model?.provenance,
+    picture.ledger?.assessment?.provenance,
+    picture.completeness?.provenance,
+    picture.baselineTroponin?.reference?.provenance,
+  ].filter(Boolean);
+
+  const seen = new Map();
+  provenances.forEach((item) => {
+    const source = clinicalSource(item.sourceId);
+    if (source && !seen.has(source.id)) seen.set(source.id, source);
+  });
+  return Array.from(seen.values());
+}
 
 function historySummary(patient) {
   return HISTORY_GROUPS.map((group) => {
@@ -470,30 +503,177 @@ export function PrintReport({ patient, encounter, picture, summary }) {
         </p>
       </ReportBlock>
 
-      <ReportBlock title="Risk assessment">
+      {/* The two axes are reported as separate blocks, in the order a reader
+          needs them: what the patient was before treatment, then what has
+          happened since. Merging them into one "risk" line is what made the old
+          report unable to say "low risk, deteriorated anyway". */}
+      <ReportBlock title="Baseline cardiovascular risk">
+        {picture.baselineRisk.applicable ? (
+          <>
+            <ReportRows
+              rows={[
+                ["HFA-ICOS category", picture.baselineRisk.category],
+                ["Moderate-risk total", `${picture.baselineRisk.points} point${picture.baselineRisk.points === 1 ? "" : "s"}`],
+                ["Rule applied", picture.baselineRisk.rule],
+                ["Baseline LVEF", patient.baselineLVEF ? `${patient.baselineLVEF}%` : null],
+                ["Baseline GLS", patient.baselineGLS ? `${patient.baselineGLS}%` : null],
+                ["Baseline dataset", `${picture.completeness.percent}% complete — ${picture.completeness.bandLabel.toLowerCase()}`],
+              ]}
+            />
+            <h3>Contributing factors</h3>
+            {picture.baselineRisk.contributing.length === 0 ? (
+              <p className="report-empty">No risk factor from this proforma is present.</p>
+            ) : (
+              <ul className="report-list">
+                {picture.baselineRisk.contributing.map((factor) => (
+                  <li key={factor.id}>
+                    {factor.label} — {factor.tierLabel.toLowerCase()}
+                    {factor.weight ? ` (${factor.weight} point${factor.weight === 1 ? "" : "s"})` : ""}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <h3>Workings</h3>
+            <ul className="report-list">
+              {picture.baselineRisk.workings.map((step) => <li key={step}>{step}</li>)}
+            </ul>
+            {picture.baselineRisk.limitation && <p><strong>Limitation:</strong> {picture.baselineRisk.limitation}</p>}
+            {picture.completeness.caveat && <p><strong>Data completeness:</strong> {picture.completeness.caveat}</p>}
+          </>
+        ) : (
+          <p>
+            No published HFA-ICOS baseline proforma applies to the planned therapy.{" "}
+            {picture.baselineRisk.unscoredNotes.map((item) => item.note).filter(Boolean).join(" ")}
+          </p>
+        )}
+      </ReportBlock>
+
+      <ReportBlock title="Current cardiovascular status (CTR-CVT)">
         <ReportRows
           rows={[
-            ["Baseline HFA-ICOS", `${picture.riskAssessment.category} — ${picture.riskAssessment.reason}`],
-            ["Current risk", picture.currentRisk],
-            ["Escalation", picture.riskEscalation],
-            ["Cardiac dysfunction", picture.ctrcd.label],
-            ["Baseline LVEF", patient.baselineLVEF ? `${patient.baselineLVEF}%` : null],
-            ["Cumulative anthracycline", picture.ledger.total ? `${picture.ledger.total} mg/m² doxorubicin-equivalent` : null],
+            ["Overall severity", picture.ctrCvt.overallLabel],
+            ["Cardiac dysfunction", picture.ctrCvt.byId.cardiacDysfunction.severityLabel],
+            ["Myocarditis", picture.ctrCvt.byId.myocarditis.severityLabel],
+            ["Vascular / ischaemic", picture.ctrCvt.byId.vascularIschaemic.severityLabel],
+            ["Hypertension", picture.ctrCvt.byId.hypertension.severityLabel],
+            ["Arrhythmia / QTc", picture.ctrCvt.byId.arrhythmiaQt.severityLabel],
+            ["Management level", `${picture.currentRisk}${picture.riskEscalation ? ` — raised: ${picture.riskEscalation}` : ""}`],
           ]}
         />
-        {picture.ctrcd.criteria.length > 0 && (
+        {picture.ctrCvt.active.length > 0 && (
           <ul className="report-list">
-            {picture.ctrcd.criteria.map((criterion) => <li key={criterion}>{criterion}</li>)}
+            {picture.ctrCvt.active.flatMap((domain) => domain.findings.map((finding) => <li key={`${domain.id}-${finding}`}>{finding}</li>))}
+          </ul>
+        )}
+        {picture.unexpectedDeterioration && (
+          <p>
+            <strong>Note:</strong> this patient&rsquo;s baseline category was {String(picture.baselineRisk.category).toLowerCase()} and toxicity has
+            developed anyway. Baseline stratification identifies who is most likely to run into trouble; it does not identify everyone who will.
+          </p>
+        )}
+      </ReportBlock>
+
+      {picture.series.some((series) => series.current !== null) && (
+        <ReportBlock title="Measurement trends">
+          <ul className="report-list">
+            {picture.series
+              .filter((series) => series.current !== null)
+              .map((series) => <li key={series.id}>{series.statement}</li>)}
+          </ul>
+        </ReportBlock>
+      )}
+
+      {picture.ledger.total > 0 && (
+        <ReportBlock title="Treatment exposure">
+          <ReportRows
+            rows={[
+              ["Cumulative doxorubicin-equivalent", `${picture.ledger.total} mg/m²`],
+              ["Given before registration", picture.ledger.prior ? `${picture.ledger.prior} mg/m²` : null],
+              ["Equivalence model", `${picture.ledger.model.label} (${picture.ledger.model.citation})`],
+              ["Threshold reached", picture.ledger.assessment.reached?.label || "None"],
+              ["Projected on completion", `${picture.ledger.assessment.projected} mg/m²`],
+            ]}
+          />
+          {picture.ledger.entries.filter((entry) => entry.scored).length > 0 && (
+            <>
+              <h3>Dose ledger</h3>
+              <ul className="report-list">
+                {picture.ledger.entries
+                  .filter((entry) => entry.scored)
+                  .map((entry) => (
+                    <li key={entry.key}>
+                      {entry.agentLabel} {entry.enteredDose} {entry.unit === "mg" ? "mg" : "mg/m²"} × factor {entry.factor} ={" "}
+                      {entry.equivalent} mg/m² doxorubicin-equivalent (running total {entry.runningTotal} mg/m²)
+                    </li>
+                  ))}
+              </ul>
+            </>
+          )}
+          {picture.ledger.divergenceNote && <p><strong>Equivalence models:</strong> {picture.ledger.divergenceNote}</p>}
+          {picture.ledger.unscoredNote && <p><strong>Not counted:</strong> {picture.ledger.unscoredNote}</p>}
+        </ReportBlock>
+      )}
+
+      {picture.redFlags.flags.length > 0 && (
+        <ReportBlock title="Current alerts">
+          <ul className="report-list">
+            {picture.redFlags.flags.map((flag) => (
+              <li key={`${flag.id}-${flag.level}`}>
+                <strong>{flag.levelLabel.toUpperCase()} — {flag.title}.</strong> {flag.finding} Action: {flag.action} ({flag.provenance.shortLabel})
+              </li>
+            ))}
+          </ul>
+        </ReportBlock>
+      )}
+
+      {/* Surveillance is reported with the reason and the source for each item,
+          so a colleague reading this can see why a test was asked for rather
+          than only that it was. */}
+      <ReportBlock title="Surveillance due">
+        {picture.tasks.filter((task) => !task.completed).length === 0 ? (
+          <p className="report-empty">Nothing outstanding at this encounter.</p>
+        ) : (
+          <ul className="report-list">
+            {picture.tasks
+              .filter((task) => !task.completed)
+              .map((task) => (
+                <li key={task.id}>
+                  <strong>{task.what || task.label}</strong> — {task.when}. Why: {task.why} ({task.provenance?.shortLabel || "source not recorded"})
+                </li>
+              ))}
           </ul>
         )}
       </ReportBlock>
 
-      <ReportBlock title="Surveillance and follow-up">
-        <ul className="report-list">
-          {summary.structured.surveillance.map((item) => <li key={item}>{item}</li>)}
-          <li>Next contact {encounter.nextFollowUpDate || picture.nextFollowUp.date} — {picture.nextFollowUp.reason}.</li>
-        </ul>
+      <ReportBlock title="Next review">
+        <ReportRows
+          rows={[
+            ["Acuity", picture.nextFollowUp.label],
+            ["Date", encounter.nextFollowUpDate || picture.nextFollowUp.date],
+            ["Reason", picture.nextFollowUp.reason],
+          ]}
+        />
         {encounter.plan && <p><strong>Management plan:</strong> {encounter.plan}</p>}
+      </ReportBlock>
+
+      <ReportBlock title="Clinical decision support">
+        {picture.recommendations.length === 0 ? (
+          <p className="report-empty">No cardioprotection prompt raised at this encounter.</p>
+        ) : (
+          <ul className="report-list">
+            {picture.recommendations.map((rec) => (
+              <li key={rec.id}>
+                <strong>{rec.title} — {rec.strength.toLowerCase()}.</strong> {rec.statement || rec.guidance} Triggered by: {rec.reasons.join("; ")}.
+                {rec.onTreatment ? ` Already prescribed: ${rec.current}.` : ""}
+                {rec.provenance ? ` (${rec.provenance.shortLabel})` : ""}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p>
+          These are prompts for clinical consideration, not prescriptions. CORSC does not hold renal function, electrolytes, standing blood pressure or
+          allergy history, and cannot determine that a medicine is indicated for this patient.
+        </p>
       </ReportBlock>
 
       <ReportBlock title="Clinical summary">
@@ -516,15 +696,57 @@ export function PrintReport({ patient, encounter, picture, summary }) {
         )}
       </ReportBlock>
 
-      {encounter.notes && (
-        <ReportBlock title="Consultant notes">
-          <p>{encounter.notes}</p>
-        </ReportBlock>
-      )}
+      <ReportBlock title="Clinician assessment">
+        {encounter.notes ? <p>{encounter.notes}</p> : <p className="report-empty">No clinician narrative recorded for this encounter.</p>}
+      </ReportBlock>
+
+      {/* Overrides are reported in full — the algorithmic result, the
+          clinician's result, and the reason. A report that showed only the
+          final value would make a computed category and a clinical decision
+          indistinguishable to the next reader. */}
+      <ReportBlock title="Clinician overrides">
+        {picture.overrides.length === 0 ? (
+          <p className="report-empty">No result on this record has been overridden. Every value above is as CORSC calculated it.</p>
+        ) : (
+          <ul className="report-list">
+            {picture.overrides.map((override) => (
+              <li key={override.id}>
+                <strong>{override.targetLabel}.</strong> CORSC calculated {override.algorithmicValue || "no value"}; clinician recorded{" "}
+                {override.clinicianValue}. Reason: {override.reason}. Recorded by{" "}
+                {override.clinician.name || override.clinician.email || override.clinician.id} on {String(override.at).slice(0, 10)}
+                {override.active === false ? " (subsequently withdrawn)" : ""}.
+              </li>
+            ))}
+          </ul>
+        )}
+      </ReportBlock>
+
+      {/* The provenance appendix. Every rule that produced anything above is
+          citable from one place, so a clinician disagreeing with an output can
+          go to the source rather than to the source code. */}
+      <ReportBlock title="Clinical sources and provenance">
+        <div>
+          {reportSources(picture).map((source) => (
+            <div key={source.id} style={{ marginBottom: "8px" }}>
+              <div><strong>{source.shortLabel}</strong>{source.version ? ` · ${source.version}` : ""}</div>
+              <div style={{ fontSize: "9pt", color: "#555" }}>{source.citation}</div>
+              {source.caveat && <div style={{ fontSize: "9pt", color: "#8a5a00" }}>{source.caveat}</div>}
+            </div>
+          ))}
+        </div>
+        <ReportRows
+          rows={[
+            ["CORSC rules version", RULES_VERSION],
+            ["Baseline proforma verification", picture.baselineRisk.partiallyVerified ? "Partially verified — see limitation above" : "Verified against source"],
+            ["Anthracycline equivalence model", picture.ledger.model.label],
+          ]}
+        />
+      </ReportBlock>
 
       <footer className="report-footer">
-        Decision support based on the HFA-ICOS risk framework and ESC 2022 cardio-oncology guidelines. It does not replace clinical
-        judgement, full guideline review, or multidisciplinary cardio-oncology input. For use by qualified clinicians only.
+        Decision support based on the HFA-ICOS risk framework and ESC 2022 cardio-oncology guidelines. Every value in this report is either a
+        calculated result or a recorded clinician decision, and the two are labelled separately. It does not replace clinical judgement, full guideline
+        review, or multidisciplinary cardio-oncology input. For use by qualified clinicians only. CORSC rules version {RULES_VERSION}.
       </footer>
     </div>
   );

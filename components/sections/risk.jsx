@@ -13,10 +13,13 @@ import { ShieldAlert, TrendingDown } from "lucide-react";
 import {
   Callout,
   Checkbox,
+  CompletenessBar,
   EmptyState,
+  FlagCard,
   Grid,
   Panel,
   RiskBar,
+  SourceNote,
   Stack,
   StatusChip,
   TextField,
@@ -25,25 +28,17 @@ import {
 import { RISK_MONITORING_PLAN, riskStyle, therapyNames } from "@/lib/clinical-data";
 import { HF_STATUS_OPTIONS } from "@/lib/ctrcd";
 
-const BASELINE_REQUIREMENTS = [
-  { id: "baselineLVEF", label: "Baseline LVEF", get: (p) => p.baselineLVEF, why: "Every later ejection-fraction comparison is made against it." },
-  { id: "plannedCycles", label: "Planned cycle count", get: (p) => p.plannedCycles, why: "Sets the treatment timeline and surveillance milestones." },
-  { id: "totalPlannedDose", label: "Total planned dose", get: (p) => p.totalPlannedDose, why: "Cumulative anthracycline exposure drives dose-dependent risk." },
-  { id: "baselineWeight", label: "Baseline weight", get: (p) => p.baselineWeight, why: "Reference point for weight-loss and body-surface-area recalculation." },
-  { id: "age", label: "Age", get: (p) => p.age, why: "Age bands contribute directly to the HFA-ICOS score." },
-];
-
 export function RiskSection({ patient, setPatient, encounter, setEncounter, picture }) {
-  const { currentRisk, riskEscalation, signals, riskAssessment, ctrcd } = picture;
+  const { currentRisk, riskEscalation, signals, riskAssessment, ctrcd, baselineRisk, ctrCvt, redFlags, completeness, pathways, unexpectedDeterioration } =
+    picture;
   const baseline = riskAssessment;
   const baselineStyles = riskStyle(baseline.category);
   const currentStyles = riskStyle(currentRisk);
   const contributing = riskAssessment.contributing;
 
-  const missingBaseline = BASELINE_REQUIREMENTS.filter((requirement) => {
-    const value = requirement.get(patient);
-    return value === null || value === undefined || String(value).trim() === "";
-  });
+  // The missing-baseline list is now computed by lib/completeness.js, which
+  // weights each item by what it actually changes and marks the ones without
+  // which a downstream conclusion cannot be drawn at all.
 
   const restrat = patient.restratification || {};
   function setRestrat(field, value) {
@@ -61,22 +56,96 @@ export function RiskSection({ patient, setPatient, encounter, setEncounter, pict
 
   return (
     <Stack gap="gap-4">
+      {/* ------------------------------------------------------------------
+          The two axes, side by side and clearly different things.
+
+          Axis one is fixed at registration and never moves. Axis two is what
+          has happened since, on its own scale. The previous build showed the
+          second escalating the first, using the same four words, so the record
+          could not distinguish a risky patient from a damaged one.
+          ---------------------------------------------------------------- */}
       <Grid cols="sm:grid-cols-2">
         <div className={`rounded-2xl border p-4 ${baselineStyles.bg} ${baselineStyles.border}`}>
-          <div className="mb-1 text-[11px] uppercase tracking-widest text-slate-500">Baseline HFA-ICOS</div>
-          <div className={`text-3xl font-bold ${baselineStyles.text}`} style={serif}>{baseline.category}</div>
-          <div className="mb-3 mt-0.5 text-[13px] text-slate-500">{baseline.reason} · {baseline.points} points</div>
-          <RiskBar category={baseline.category} styles={baselineStyles} />
-        </div>
-        <div className={`rounded-2xl border p-4 ${currentStyles.bg} ${currentStyles.border}`}>
-          <div className="mb-1 text-[11px] uppercase tracking-widest text-slate-500">Current risk status</div>
-          <div className={`text-3xl font-bold ${currentStyles.text}`} style={serif}>{currentRisk}</div>
-          <div className="mb-3 mt-0.5 text-[13px] text-slate-500">
-            {riskEscalation ? `Escalated: ${riskEscalation}` : "Unchanged from baseline"}
+          <div className="mb-1 text-[11px] uppercase tracking-widest text-slate-500">
+            Baseline cardiovascular risk {baselineRisk.applicable ? "· HFA-ICOS" : ""}
           </div>
-          <RiskBar category={currentRisk} styles={currentStyles} />
+          {baselineRisk.applicable ? (
+            <>
+              <div className={`text-3xl font-bold ${baselineStyles.text}`} style={serif}>{baseline.category}</div>
+              <div className="mb-3 mt-0.5 text-[13px] text-slate-500">
+                {baseline.points} moderate-risk point{baseline.points === 1 ? "" : "s"} · fixed at registration
+              </div>
+              <RiskBar category={baseline.category} styles={baselineStyles} />
+            </>
+          ) : (
+            <>
+              <div className="text-[19px] font-bold text-slate-700" style={serif}>Not applicable</div>
+              <p className="mt-1 text-[12.5px] leading-relaxed text-slate-600">
+                {baselineRisk.unscoredNotes.map((item) => item.note).filter(Boolean)[0] || baselineRisk.reason}
+              </p>
+            </>
+          )}
+          {completeness?.caveat && (
+            <p className="mt-2 text-[12px] font-medium text-amber-700">{completeness.caveat}</p>
+          )}
+          <SourceNote provenance={baselineRisk.provenance} />
+        </div>
+
+        <div className={`rounded-2xl border p-4 ${riskStyle(ctrCvt.overall === "none" ? "Low" : ctrCvt.overall === "mild" ? "Moderate" : "High").bg} border-slate-200`}>
+          <div className="mb-1 text-[11px] uppercase tracking-widest text-slate-500">Current cardiovascular status · CTR-CVT</div>
+          <div className="text-3xl font-bold text-slate-900" style={serif}>{ctrCvt.overallLabel}</div>
+          <div className="mb-3 mt-0.5 text-[13px] leading-relaxed text-slate-500">{ctrCvt.summary}</div>
+          <div className="space-y-1">
+            {ctrCvt.domains.map((domain) => (
+              <div key={domain.id} className="flex items-center justify-between gap-2 text-[12.5px]">
+                <span className={domain.present ? "text-slate-800" : "text-slate-400"}>{domain.label}</span>
+                <StatusChip tone={domain.present ? domain.tone : "neutral"}>{domain.severityLabel}</StatusChip>
+              </div>
+            ))}
+          </div>
+          <SourceNote provenance={ctrCvt.provenance} />
         </div>
       </Grid>
+
+      {unexpectedDeterioration && (
+        <Callout tone="warning" title="Toxicity in a patient who was not stratified as high risk">
+          This patient&rsquo;s baseline category was {String(baseline.category).toLowerCase()} and they have developed{" "}
+          {ctrCvt.overallLabel.toLowerCase()} toxicity anyway. Baseline stratification identifies who is most likely to run into trouble; it does not
+          identify everyone who will. Do not let the baseline category argue against what is being measured now.
+        </Callout>
+      )}
+
+      {redFlags.flags.length > 0 && (
+        <Panel
+          title="Current alerts"
+          subtitle={`${redFlags.counts.red} emergency · ${redFlags.counts.orange} urgent · ${redFlags.counts.yellow} for review`}
+        >
+          <div className="space-y-2">
+            {redFlags.flags.map((flag) => (
+              <FlagCard key={`${flag.id}-${flag.level}`} flag={flag} />
+            ))}
+          </div>
+        </Panel>
+      )}
+
+      <Panel title="Management level" subtitle="How intensively to monitor now — derived from both axes, and not itself a risk category">
+        <Stack gap="gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`text-[19px] font-bold ${currentStyles.text}`} style={serif}>{currentRisk}</span>
+            <StatusChip tone={riskEscalation ? "warning" : "ok"}>
+              {riskEscalation ? "Raised above baseline" : "At the baseline level"}
+            </StatusChip>
+          </div>
+          <RiskBar category={currentRisk} styles={currentStyles} />
+          <p className="text-[13px] leading-relaxed text-slate-600">
+            {riskEscalation
+              ? `Raised because: ${riskEscalation}. The surveillance schedule and follow-up interval below reflect this level, not the baseline category.`
+              : "Nothing found at this encounter raises monitoring above the level the baseline category calls for."}
+          </p>
+        </Stack>
+      </Panel>
+
+      {completeness && <CompletenessBar completeness={completeness} />}
 
       <Panel
         title="Graded cardiac dysfunction"
@@ -108,30 +177,88 @@ export function RiskSection({ patient, setPatient, encounter, setEncounter, pict
         </Stack>
       </Panel>
 
-      <Panel title="Why this patient is in this category">
-        <Stack gap="gap-2">
-          <p className="text-[13.5px] leading-relaxed text-slate-700">
-            {baseline.category === "Low"
-              ? "No very-high or high-risk factor is present and the moderate-risk score is below the escalation threshold, so baseline risk is low."
-              : baseline.category === "Very High"
-                ? "At least one very-high-risk factor is present, which places the patient in the highest category regardless of the moderate-risk score."
-                : baseline.category === "High"
-                  ? "Either a high-risk factor is present, or the moderate-risk score reached two points or more, which escalates the category to high."
-                  : "A single moderate-risk point is present, which places the patient in the moderate category."}
-            {picture.therapies.length
-              ? ` The planned therapy is ${therapyNames(patient.therapy).toLowerCase()}, and the proforma above matches ${
-                  picture.therapies.length > 1 ? "that combination" : "it"
-                }.`
-              : ""}
-          </p>
-          {riskEscalation && (
-            <Callout tone="danger" title="Live escalation above baseline">
-              {riskEscalation}. The surveillance schedule and follow-up interval below already reflect the escalated category, not the
-              baseline one.
+      {/* The arithmetic, shown in full so the category can be reproduced by
+          hand. A risk tool a clinician cannot check is a risk tool they have to
+          take on trust. */}
+      {baselineRisk.applicable && (
+        <Panel
+          title="How this category was reached"
+          subtitle={`Planned therapy: ${therapyNames(patient.therapy)}`}
+        >
+          <Stack gap="gap-3">
+            {baselineRisk.results.map((result) => (
+              <div key={result.therapyId} className="rounded-xl border border-slate-200 p-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="text-[13.5px] font-semibold text-slate-900">{result.label}</span>
+                  <StatusChip tone={result.category === "Low" ? "ok" : result.category === "Moderate" ? "warning" : "danger"}>
+                    {result.category}
+                  </StatusChip>
+                </div>
+                <ol className="mt-2 space-y-1">
+                  {result.workings.map((step) => (
+                    <li key={step} className="text-[12.5px] leading-relaxed text-slate-600">{step}</li>
+                  ))}
+                </ol>
+                {result.limitation && (
+                  <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[12px] leading-relaxed text-amber-800">{result.limitation}</p>
+                )}
+                <SourceNote provenance={result.provenance} />
+              </div>
+            ))}
+
+            {baselineRisk.composition && (
+              <Callout tone="info" title="More than one therapy is planned">
+                {baselineRisk.composition.detail}
+              </Callout>
+            )}
+
+            {baselineRisk.modifiers.length > 0 && (
+              <div className="rounded-xl border border-slate-200 p-3">
+                <div className="text-[13px] font-semibold text-slate-900">Additional risk factors outside the proforma</div>
+                <p className="mt-0.5 text-[12.5px] text-slate-500">
+                  Real risk factors that are not rows in the published proforma, so they add no points to the category above.
+                </p>
+                {baselineRisk.modifiers.map((modifier) => (
+                  <div key={modifier.id} className="mt-2">
+                    <div className="text-[13px] text-slate-800">{modifier.label}</div>
+                    <SourceNote provenance={modifier.provenance} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </Stack>
+        </Panel>
+      )}
+
+      {/* Therapies with no published proforma get a named pathway instead of a
+          number that would look like an HFA-ICOS score but is not one. */}
+      {pathways.filter((entry) => !entry.usesHfaIcos && entry.baseline).map((entry) => (
+        <Panel key={entry.therapyId} title={entry.baseline.label} subtitle={entry.baseline.summary}>
+          <Stack gap="gap-2">
+            <Callout tone="info" title="This is not a risk score">
+              {entry.baseline.disclaimer}
             </Callout>
-          )}
-        </Stack>
-      </Panel>
+            {entry.baseline.concerns.length === 0 ? (
+              <EmptyState>No pathway-specific baseline concern identified from the data recorded.</EmptyState>
+            ) : (
+              <div className="space-y-1.5">
+                {entry.baseline.concerns.map((concern) => (
+                  <div key={concern.id} className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2">
+                    <div className="text-[13.5px] font-medium text-amber-900">{concern.label}</div>
+                    <div className="mt-0.5 text-[12.5px] leading-relaxed text-slate-600">{concern.detail}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="rounded-lg border border-slate-200 px-3 py-2">
+              <div className="text-[12.5px] font-medium text-slate-800">What this pathway watches for</div>
+              <div className="mt-0.5 text-[12.5px] text-slate-600">{entry.pathway.watchFor.join(" · ")}</div>
+              <div className="mt-1 text-[12px] leading-relaxed text-slate-500">{entry.pathway.note}</div>
+            </div>
+            <SourceNote provenance={entry.baseline.provenance} />
+          </Stack>
+        </Panel>
+      ))}
 
       <Panel
         title="Contributing risk factors"
@@ -171,21 +298,30 @@ export function RiskSection({ patient, setPatient, encounter, setEncounter, pict
         </Panel>
       )}
 
-      <Panel title="Missing baseline data" subtitle="Gaps that weaken later comparisons">
-        {missingBaseline.length === 0 ? (
+      <Panel title="Missing baseline data" subtitle="Gaps that weaken later comparisons, weighted by what they actually change">
+        {completeness.missing.length === 0 ? (
           <Callout tone="ok" title="Baseline dataset complete">
             All baseline values needed for meaningful serial comparison are recorded.
           </Callout>
         ) : (
           <div className="space-y-1.5">
-            {missingBaseline.map((requirement) => (
-              <div key={requirement.id} className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2">
-                <div className="text-[13.5px] font-medium text-amber-800">{requirement.label} not recorded</div>
-                <div className="mt-0.5 text-[12.5px] text-slate-600">{requirement.why}</div>
+            {completeness.missing.map((item) => (
+              <div
+                key={item.id}
+                className={`rounded-lg border px-3 py-2 ${item.critical ? "border-red-200 bg-red-50/60" : "border-amber-200 bg-amber-50/50"}`}
+              >
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className={`text-[13.5px] font-medium ${item.critical ? "text-red-800" : "text-amber-800"}`}>
+                    {item.label} not recorded
+                  </span>
+                  {item.critical && <StatusChip tone="danger">Critical</StatusChip>}
+                </div>
+                <div className="mt-0.5 text-[12.5px] leading-relaxed text-slate-600">{item.why}</div>
               </div>
             ))}
           </div>
         )}
+        <SourceNote provenance={completeness.provenance} />
       </Panel>
 
       <Panel title="Recommended monitoring plan" subtitle={`Follows from the ${currentRisk.toLowerCase()} risk category`}>

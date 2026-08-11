@@ -19,11 +19,11 @@ export const serif = { fontFamily: "var(--font-heading, 'Geist', system-ui, sans
 export const mono = { fontFamily: "var(--font-geist-mono, ui-monospace, monospace)" };
 
 export const TONES = {
-  ok: { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-800", label: "text-emerald-700", dot: "bg-emerald-500" },
-  info: { bg: "bg-sky-50", border: "border-sky-200", text: "text-sky-800", label: "text-sky-700", dot: "bg-sky-500" },
-  warning: { bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-800", label: "text-amber-700", dot: "bg-amber-500" },
-  danger: { bg: "bg-red-50", border: "border-red-200", text: "text-red-800", label: "text-red-700", dot: "bg-red-500" },
-  neutral: { bg: "bg-slate-50", border: "border-slate-200", text: "text-slate-700", label: "text-slate-600", dot: "bg-slate-400" },
+  ok: { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-800", label: "text-emerald-700", dot: "bg-emerald-500", bar: "bg-emerald-500" },
+  info: { bg: "bg-sky-50", border: "border-sky-200", text: "text-sky-800", label: "text-sky-700", dot: "bg-sky-500", bar: "bg-sky-500" },
+  warning: { bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-800", label: "text-amber-700", dot: "bg-amber-500", bar: "bg-amber-500" },
+  danger: { bg: "bg-red-50", border: "border-red-200", text: "text-red-800", label: "text-red-700", dot: "bg-red-500", bar: "bg-red-500" },
+  neutral: { bg: "bg-slate-50", border: "border-slate-200", text: "text-slate-700", label: "text-slate-600", dot: "bg-slate-400", bar: "bg-slate-400" },
 };
 
 export function tone(name) {
@@ -531,6 +531,125 @@ export function KeyValue({ label, value, mono: useMono = true }) {
       >
         {value === null || value === undefined || value === "" ? "—" : value}
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ provenance */
+
+/**
+ * Renders where a clinical rule came from.
+ *
+ * Deliberately always visible rather than hidden behind a tooltip. A clinician
+ * deciding whether to act on a recommendation needs to see, without a hover,
+ * whether it comes from a guideline or from a local scheduling convention —
+ * and whether the implementation was verified against the source or only
+ * partly so.
+ */
+export function SourceNote({ provenance, className = "" }) {
+  if (!provenance) return null;
+  const partial = provenance.verification === "partial";
+  const local = provenance.verification === "local";
+  return (
+    <div className={`mt-1.5 text-[11.5px] leading-snug text-slate-500 ${className}`}>
+      <span className="font-medium text-slate-600">
+        {provenance.shortLabel}
+        {provenance.version ? ` · ${provenance.version}` : ""}
+      </span>
+      {provenance.locator && <span> · {provenance.locator}</span>}
+      {(partial || local) && (
+        <StatusChip tone={partial ? "warning" : "info"} className="ml-1.5 align-middle">
+          {provenance.verificationLabel}
+        </StatusChip>
+      )}
+      {provenance.caveat && <div className="mt-0.5 text-amber-700">{provenance.caveat}</div>}
+      {provenance.note && <div className="mt-0.5 text-slate-500">{provenance.note}</div>}
+    </div>
+  );
+}
+
+/** The full citation, for the printed report and the sources panel. */
+export function Citation({ source }) {
+  if (!source) return null;
+  return (
+    <div className="border-l-2 border-slate-200 py-1 pl-3">
+      <div className="text-[12.5px] font-semibold text-slate-800">{source.title}</div>
+      <div className="mt-0.5 text-[11.5px] leading-relaxed text-slate-500">{source.citation}</div>
+      {source.caveat && <div className="mt-1 text-[11.5px] leading-relaxed text-amber-700">{source.caveat}</div>}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- alerts */
+
+const FLAG_STYLES = {
+  red: { bg: "bg-red-50", border: "border-red-300", text: "text-red-800", dot: "bg-red-600" },
+  orange: { bg: "bg-orange-50", border: "border-orange-300", text: "text-orange-800", dot: "bg-orange-500" },
+  yellow: { bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-800", dot: "bg-amber-500" },
+  green: { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-800", dot: "bg-emerald-500" },
+};
+
+export function flagStyle(level) {
+  return FLAG_STYLES[level] || FLAG_STYLES.green;
+}
+
+/**
+ * One red-flag card: what was found, what to do, why, and where the rule
+ * comes from. All four are shown, because an alert a clinician cannot audit is
+ * an alert they will eventually learn to dismiss.
+ */
+export function FlagCard({ flag }) {
+  const style = flagStyle(flag.level);
+  return (
+    <div className={`rounded-xl border p-3 ${style.bg} ${style.border}`}>
+      <div className="flex items-start gap-2">
+        <span className={`mt-1.5 size-2 shrink-0 rounded-full ${style.dot}`} aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          <div className={`text-[13.5px] font-semibold ${style.text}`}>{flag.title}</div>
+          {flag.finding && <div className="mt-0.5 text-[12.5px] text-slate-600">{flag.finding}</div>}
+          {flag.action && (
+            <div className="mt-1.5 text-[13px] leading-relaxed text-slate-700">
+              <span className="font-medium text-slate-800">Do now: </span>
+              {flag.action}
+            </div>
+          )}
+          {flag.why && (
+            <div className="mt-1 text-[12.5px] leading-relaxed text-slate-500">
+              <span className="font-medium">Why: </span>
+              {flag.why}
+            </div>
+          )}
+          <SourceNote provenance={flag.provenance} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------- completeness */
+
+/**
+ * The completeness bar shown beside any risk category.
+ *
+ * Its job is to stop a category computed from four facts looking identical to
+ * one computed from twenty.
+ */
+export function CompletenessBar({ completeness }) {
+  if (!completeness) return null;
+  const t = tone(completeness.bandTone);
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-[11px] uppercase tracking-widest text-slate-500">Baseline completeness</span>
+        <span className="flex items-center gap-2">
+          <span className="text-[17px] font-bold text-slate-900" style={mono}>{completeness.percent}%</span>
+          <StatusChip tone={completeness.bandTone}>{completeness.bandLabel}</StatusChip>
+        </span>
+      </div>
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+        <div className={`h-full rounded-full ${t.bar || "bg-slate-400"}`} style={{ width: `${completeness.percent}%` }} />
+      </div>
+      <p className={`mt-2 text-[12.5px] leading-relaxed ${t.label}`}>{completeness.bandDetail}</p>
     </div>
   );
 }
