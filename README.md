@@ -1,6 +1,6 @@
 ## CORSC
 
-**Cardiac Oncology Risk Surveillance and Care** is a browser-based clinical decision-support system for cardio-oncology outpatient work: risk stratification, surveillance planning, and structured encounter documentation.
+**Cardiac Oncology Risk Surveillance and Care** is a clinical decision-support system for cardio-oncology outpatient work: risk stratification, surveillance planning, and structured encounter documentation.
 
 The whole encounter is a single continuous workflow rather than a set of separate pages:
 
@@ -45,24 +45,53 @@ Numeric thresholds are exported from one place per module so they can be reviewe
 - `DOSE_THRESHOLDS` and the agent equivalence factors in `lib/anthracycline.js` — published cardiotoxicity equivalence ratios vary between sources, particularly for mitoxantrone.
 - `ACUITY` and `ROUTINE_INTERVAL` in `lib/acuity.js` — follow-up bands and routine intervals.
 
-Patient records are stored in the current browser's local storage and never leave the device. Sign-in is handled by Supabase; there is no server-side clinical persistence in this build.
+## Where patient data lives
+
+Patient records are held in PostgreSQL, behind an API that authenticates every
+request, derives authorisation from the database rather than from the client,
+and writes an append-only audit trail. See
+[docs/BACKEND_ARCHITECTURE.md](./docs/BACKEND_ARCHITECTURE.md),
+[docs/DATABASE.md](./docs/DATABASE.md) and [docs/API.md](./docs/API.md).
+
+Earlier builds kept records in the browser's local storage. That store is
+retained only as a fallback for when the server cannot be reached mid-clinic,
+and the application says so plainly whenever it is in use — local storage is
+unencrypted at rest, readable by anything running in the page, lost when the
+browser is cleared, and impossible to audit or revoke. Records already there
+can be imported from the banner on the caseload screen: check first with a dry
+run that writes nothing, then import. The browser copy is never removed by the
+import.
 
 ## Development
 
 ```bash
-npm install
+npm install                    # runs prisma generate
+cp example.env .env.local      # then fill in DATABASE_URL, DIRECT_URL and the Supabase values
+
+npx prisma migrate deploy      # create the schema
+npm run db:import-formulary    # load the medication dictionary
+npm run db:seed                # three synthetic patients — development only
+
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
 Then open [http://localhost:3000](http://localhost:3000).
+
+| Script | Does |
+| --- | --- |
+| `npm run db:validate` | validate `prisma/schema.prisma` |
+| `npm run db:migrate` | create and apply a migration in development |
+| `npm run db:deploy` | apply committed migrations |
+| `npm run db:seed` | synthetic development patients — refuses to run against production |
+| `npm run db:import-formulary` | load the formulary CSVs |
 
 ## Supabase authentication
 
 The app uses Supabase email/password authentication. Copy [example.env](./example.env) to `.env.local` and set the same variables in the deployment environment.
 
-Create accounts in **Supabase Dashboard → Authentication → Users** (or invite users), with a password. Adding a record only to an application database table does not create a sign-in account.
+Create accounts in **Supabase Dashboard → Authentication → Users** (or invite users), with a password. A clinician profile is created on first sign-in with the least-privileged role that can still do clinical work; higher roles are granted deliberately by an administrator. Adding a record only to an application database table does not create a sign-in account.
+
+Only the **publishable** key is used, on the client and on the server. The service-role key is never read by CORSC and must never appear in a `NEXT_PUBLIC_` variable.
 
 ## Validation
 
@@ -74,6 +103,16 @@ npm test
 
 The test suite covers the clinical engines with fixtures written from the guideline criteria, so the logic can be checked without reading the implementation. `npm run test:watch` runs it continuously.
 
+The database, API and integration suites under `tests/` need a PostgreSQL and skip without one, so `npm test` works with nothing running. Point `DATABASE_URL` at a scratch database to run them:
+
+```bash
+DATABASE_URL=postgresql://…  DIRECT_URL=postgresql://…  npm test
+```
+
+CI runs them against an ephemeral PostgreSQL with `CORSC_REQUIRE_DB=1`, which turns a skipped suite into a failure.
+
 ## Clinical notice
 
 CORSC supports qualified clinicians; it does not replace clinical judgment, institutional protocols, guideline review, or multidisciplinary cardio-oncology input.
+
+Software correctness and clinical validation are different things. A green test suite means the software behaves as its authors intended, not that the intentions are clinically correct. Some rules in the provenance registry are marked **partially verified** and are rendered as such wherever they appear; confirm them against the published sources before clinical use.
