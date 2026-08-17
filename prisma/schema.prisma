@@ -1,0 +1,1156 @@
+// =========================================================================
+// CORSC — relational schema.
+//
+// DESIGN RULES THIS SCHEMA OBEYS
+//
+// 1. No clinical rule lives here. There are no thresholds, no conversion
+//    factors, no proforma weights and no guideline text in this file. Those
+//    live in versioned application code (lib/clinical-sources.js and the
+//    engines) so that changing a clinical rule is a reviewed code change
+//    rather than a row update. What IS stored is the engine and rules version
+//    that produced each computed result.
+//
+// 2. Clinical facts are columns, not a JSON blob. A patient record is spread
+//    across normalised tables so that "every LVEF this patient has ever had"
+//    is a query rather than a scan of serialised objects. JSON appears in
+//    exactly three places, each named and justified at the field.
+//
+// 3. Baseline risk and current toxicity are separate tables. A troponin rise
+//    after cycle 4 must never rewrite what the patient's risk was before
+//    therapy started.
+//
+// 4. Nothing clinical is deleted. Patients are archived, overrides are
+//    withdrawn rather than removed, audit rows have no update path.
+//
+// 5. The clinical engines are not changed to fit this schema. Reading happens
+//    through lib/backend/services/engine-patient.ts, which assembles these
+//    rows into the exact object shape the engines already consume.
+// =========================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Supabase's pooled connection cannot run migrations; DIRECT_URL is the
+  // unpooled connection used by `prisma migrate`.
+  directUrl = env("DIRECT_URL")
+}
+
+// ------------------------------------------------------------------ enums
+
+/// Authorisation is derived from this column server-side. A role supplied by
+/// the client is never trusted.
+enum ClinicianRole {
+  ADMIN
+  CARDIO_ONCOLOGIST
+  ONCOLOGIST
+  CLINICIAN
+  RESEARCHER
+  READ_ONLY
+}
+
+enum PatientStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum Sex {
+  MALE
+  FEMALE
+  OTHER
+  NOT_RECORDED
+}
+
+enum TreatmentIntent {
+  CURATIVE
+  ADJUVANT
+  NEOADJUVANT
+  PALLIATIVE
+  MAINTENANCE
+  NOT_RECORDED
+}
+
+enum HistoryEntryKind {
+  CHECK
+  FIELD
+}
+
+/// The four HFA-ICOS risk tiers. The weights attached to each tier live in
+/// lib/hfa-icos.js, not here.
+enum RiskTier {
+  VERY_HIGH
+  HIGH
+  MODERATE_2
+  MODERATE_1
+}
+
+enum ContraindicationSeverity {
+  ABSOLUTE
+  RELATIVE
+}
+
+enum DoseUnit {
+  MG_PER_M2
+  MG
+}
+
+enum CycleStatus {
+  PLANNED
+  ADMINISTERED
+  DELAYED
+  OMITTED
+}
+
+enum MedicationRoute {
+  ORAL
+  SUBLINGUAL
+  INTRAVENOUS
+  SUBCUTANEOUS
+  INTRAMUSCULAR
+  TRANSDERMAL
+  INHALED
+  TOPICAL
+  OTHER
+}
+
+enum FoodRelation {
+  BEFORE_FOOD
+  AFTER_FOOD
+  WITH_FOOD
+  NOT_SPECIFIED
+}
+
+enum VisitStatus {
+  DRAFT
+  FILED
+}
+
+enum SystemExamStatus {
+  NOT_EXAMINED
+  NORMAL
+  FINDINGS
+}
+
+/// Which engine produced a stored assessment. Baseline risk and current
+/// toxicity are deliberately distinct kinds.
+enum AssessmentKind {
+  BASELINE_RISK
+  CTR_CVT
+  CTRCD
+  FITNESS
+  SURVEILLANCE
+  RED_FLAGS
+  COMPLETENESS
+}
+
+enum SurveillanceStatus {
+  DUE
+  COMPLETED
+  CANCELLED
+  SUPERSEDED
+}
+
+enum FollowUpStatus {
+  PLANNED
+  COMPLETED
+  MISSED
+  CANCELLED
+}
+
+enum LegacyImportOutcome {
+  IMPORTED
+  SKIPPED_DUPLICATE
+  NEEDS_REVIEW
+  FAILED
+}
+
+// ------------------------------------------------------------- clinicians
+
+/// Service-facing clinician profile. `id` is the Supabase auth user id, so
+/// authentication stays with Supabase and authorisation stays here.
+model Clinician {
+  id          String        @id @db.Uuid
+  email       String        @unique
+  displayName String?       @map("display_name")
+  role        ClinicianRole @default(CLINICIAN)
+  active      Boolean       @default(true)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  patientsCreated       Patient[]                @relation("PatientCreatedBy")
+  careTeamMemberships   CareTeamMember[]
+  visits                Visit[]
+  assessments           Assessment[]
+  overrides             ClinicalOverride[]       @relation("OverrideAuthor")
+  overridesWithdrawn    ClinicalOverride[]       @relation("OverrideWithdrawnBy")
+  auditEvents           AuditEvent[]
+  surveillanceCompleted SurveillanceRecommendation[]
+  legacyImports         LegacyImport[]
+
+  @@index([role])
+  @@map("clinicians")
+}
+
+/// Explicit care-team membership. Shared caseloads are a real requirement in a
+/// cardio-oncology service, but access is granted deliberately per patient
+/// rather than by making every row visible to every authenticated user.
+model CareTeamMember {
+  id          String   @id @default(uuid()) @db.Uuid
+  patientId   String   @map("patient_id") @db.Uuid
+  clinicianId String   @map("clinician_id") @db.Uuid
+  grantedById String?  @map("granted_by_id") @db.Uuid
+  grantedAt   DateTime @default(now()) @map("granted_at")
+  revokedAt   DateTime? @map("revoked_at")
+
+  patient   Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  clinician Clinician @relation(fields: [clinicianId], references: [id], onDelete: Cascade)
+
+  @@unique([patientId, clinicianId])
+  @@index([clinicianId, revokedAt])
+  @@map("care_team_members")
+}
+
+// ---------------------------------------------------------------- patient
+
+model Patient {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Local hospital identifier. Deliberately not globally unique: two services
+  /// using CORSC may legitimately run overlapping numbering schemes. Uniqueness
+  /// is scoped to the registering clinician.
+  hospitalPatientId String? @map("hospital_patient_id")
+  mrn               String?
+
+  name        String
+  dateOfBirth DateTime? @map("date_of_birth") @db.Date
+  /// Age as recorded at registration. Retained alongside dateOfBirth because
+  /// the HFA-ICOS proformas score the age that was recorded, and many records
+  /// carry an age with no date of birth.
+  ageAtRegistration Int? @map("age_at_registration")
+  sex               Sex  @default(NOT_RECORDED)
+
+  status         PatientStatus @default(ACTIVE)
+  clinicalStatus String        @default("Stable") @map("clinical_status")
+
+  registeredOn DateTime  @default(now()) @map("registered_on") @db.Date
+  archivedAt   DateTime? @map("archived_at")
+  archivedById String?   @map("archived_by_id") @db.Uuid
+  archiveReason String?  @map("archive_reason")
+
+  createdById String   @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  /// Identifier this record carried in the browser store it was imported from.
+  /// Kept so a re-run of the migration recognises the record instead of
+  /// creating a duplicate.
+  legacyId String? @map("legacy_id")
+
+  createdBy Clinician @relation("PatientCreatedBy", fields: [createdById], references: [id])
+
+  baseline            PatientBaseline?
+  toxicityStatus      PatientToxicityStatus?
+  careTeam            CareTeamMember[]
+  historyEntries      PatientHistoryEntry[]
+  riskFactors         RiskFactorAssertion[]
+  contraindications   ContraindicationAssertion[]
+  diagnoses           CancerDiagnosis[]
+  therapyPlans        TherapyPlan[]
+  medications         PatientMedication[]
+  visits              Visit[]
+  investigations      Investigation[]
+  anthracyclineDoses  AnthracyclineDose[]
+  assessments         Assessment[]
+  surveillance        SurveillanceRecommendation[]
+  followUps           FollowUp[]
+  overrides           ClinicalOverride[]
+  auditEvents         AuditEvent[]
+  legacyImports       LegacyImport[]
+
+  @@unique([createdById, legacyId], name: "patient_legacy_identity")
+  @@index([createdById, status, updatedAt(sort: Desc)])
+  @@index([createdById, hospitalPatientId])
+  @@index([name])
+  /// Trigram index for the worklist's partial-name search.
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "patients_name_trgm_idx")
+  @@map("patients")
+}
+
+/// The baseline cardiovascular dataset: the values every later measurement is
+/// compared against. Separated from `patients` because it is the reference
+/// point of the whole record and must not be edited casually alongside a
+/// change of address.
+///
+/// These stay first-class columns rather than being derived from the baseline
+/// visit's investigation rows: the engines read them directly, and a service
+/// that recomputed "the baseline" from whichever row looked earliest would
+/// silently change historical assessments.
+model PatientBaseline {
+  patientId String @id @map("patient_id") @db.Uuid
+
+  lvef     Decimal? @db.Decimal(4, 1)
+  gls      Decimal? @db.Decimal(4, 1)
+  qtc      Int?
+  troponin Decimal? @db.Decimal(12, 3)
+  ntProBnp Decimal? @map("nt_probnp") @db.Decimal(12, 3)
+  weightKg Decimal? @map("weight_kg") @db.Decimal(5, 2)
+  heightCm Decimal? @map("height_cm") @db.Decimal(5, 1)
+
+  /// The troponin assay these baseline and later values are read against, and
+  /// the local upper reference limit if the laboratory publishes its own.
+  /// Stored because troponin values from different assays are not comparable
+  /// and a single universal threshold would misread them.
+  troponinAssayId  String?  @map("troponin_assay_id")
+  troponinLocalUrl Decimal? @map("troponin_local_url") @db.Decimal(12, 3)
+
+  recordedAt DateTime @default(now()) @map("recorded_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@map("patient_baselines")
+}
+
+/// Clinician-asserted current cardiovascular status — facts recorded about the
+/// patient now, as distinct from anything measured at a single visit.
+///
+/// This is the "current" axis. It is deliberately a different table from
+/// `risk_assessments`, which holds the pre-therapy baseline, so that a rise in
+/// troponin can never overwrite what the baseline risk was.
+model PatientToxicityStatus {
+  patientId String @id @map("patient_id") @db.Uuid
+
+  myocarditisConfirmed Boolean  @default(false) @map("myocarditis_confirmed")
+  severeHeartFailure   Boolean  @default(false) @map("severe_heart_failure")
+  troponinRise         Boolean  @default(false) @map("troponin_rise")
+  glsFallPercent       Decimal? @map("gls_fall_percent") @db.Decimal(5, 2)
+  currentLvef          Decimal? @map("current_lvef") @db.Decimal(4, 1)
+
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@map("patient_toxicity_status")
+}
+
+/// One row per answered history item. The vocabulary of group and item
+/// identifiers is defined in lib/clinical-data.js (HISTORY_GROUPS); storing
+/// answers as rows rather than one JSON document means "every patient with
+/// prior mediastinal radiotherapy" is an indexed query.
+model PatientHistoryEntry {
+  id        String           @id @default(uuid()) @db.Uuid
+  patientId String           @map("patient_id") @db.Uuid
+  groupId   String           @map("group_id")
+  itemId    String           @map("item_id")
+  kind      HistoryEntryKind
+  checked   Boolean?
+  value     String?
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@unique([patientId, groupId, itemId, kind])
+  @@index([groupId, itemId])
+  @@map("patient_history_entries")
+}
+
+/// A recorded HFA-ICOS risk factor. `tier` names which tier of the proforma the
+/// factor belongs to; the points that tier is worth are decided by the engine.
+model RiskFactorAssertion {
+  id        String   @id @default(uuid()) @db.Uuid
+  patientId String   @map("patient_id") @db.Uuid
+  tier      RiskTier
+  factorId  String   @map("factor_id")
+  present   Boolean  @default(true)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@unique([patientId, tier, factorId])
+  @@index([factorId])
+  @@map("risk_factor_assertions")
+}
+
+model ContraindicationAssertion {
+  id        String                   @id @default(uuid()) @db.Uuid
+  patientId String                   @map("patient_id") @db.Uuid
+  severity  ContraindicationSeverity
+  factorId  String                   @map("factor_id")
+  present   Boolean                  @default(true)
+  updatedAt DateTime                 @updatedAt @map("updated_at")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@unique([patientId, severity, factorId])
+  @@map("contraindication_assertions")
+}
+
+// ------------------------------------------------------- cancer diagnosis
+
+model CancerDiagnosis {
+  id        String @id @default(uuid()) @db.Uuid
+  patientId String @map("patient_id") @db.Uuid
+
+  primarySite String  @map("primary_site")
+  cancerType  String? @map("cancer_type")
+  histology   String?
+  stage       String?
+  /// True for the diagnosis the current treatment is directed at. A patient may
+  /// carry more than one diagnosis; exactly one is primary at a time.
+  isPrimary   Boolean @default(true) @map("is_primary")
+
+  intent        TreatmentIntent @default(NOT_RECORDED)
+  diagnosedOn   DateTime?       @map("diagnosed_on") @db.Date
+  active        Boolean         @default(true)
+  notes         String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  patient      Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  therapyPlans TherapyPlan[]
+
+  @@index([patientId, active])
+  @@map("cancer_diagnoses")
+}
+
+// --------------------------------------------------------- cancer therapy
+
+/// A planned course of cancer therapy. A patient may have several — sequential
+/// lines, or concurrent regimens. Combination therapy is represented by a plan
+/// carrying more than one therapy class, never by discarding one of them.
+model TherapyPlan {
+  id          String  @id @default(uuid()) @db.Uuid
+  patientId   String  @map("patient_id") @db.Uuid
+  diagnosisId String? @map("diagnosis_id") @db.Uuid
+
+  /// Free-text regimen name as the service writes it, e.g. "AC-T".
+  regimen String?
+
+  plannedCycles  Int?      @map("planned_cycles")
+  cycleFrequency String?   @map("cycle_frequency")
+  currentCycle   Int       @default(0) @map("current_cycle")
+  plannedStartOn DateTime? @map("planned_start_on") @db.Date
+  plannedEndOn   DateTime? @map("planned_end_on") @db.Date
+  actualStartOn  DateTime? @map("actual_start_on") @db.Date
+  actualEndOn    DateTime? @map("actual_end_on") @db.Date
+
+  /// Planned cumulative anthracycline exposure in doxorubicin-equivalent
+  /// mg/m², where the service records one. Delivered exposure is summed from
+  /// the dose ledger rather than stored here.
+  plannedCumulativeDose Decimal? @map("planned_cumulative_dose") @db.Decimal(8, 2)
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  patient   Patient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  diagnosis CancerDiagnosis? @relation(fields: [diagnosisId], references: [id], onDelete: SetNull)
+
+  classes TherapyClassAssignment[]
+  agents  TherapyAgent[]
+  cycles  TherapyCycle[]
+
+  @@index([patientId, active])
+  @@map("therapy_plans")
+}
+
+/// One cardiotoxicity-relevant therapy class on a plan. The class identifiers
+/// are defined in lib/clinical-data.js (THERAPY_CLASSES) and select both the
+/// HFA-ICOS proforma and the surveillance pathway.
+model TherapyClassAssignment {
+  id            String @id @default(uuid()) @db.Uuid
+  therapyPlanId String @map("therapy_plan_id") @db.Uuid
+  therapyClass  String @map("therapy_class")
+  /// Ordering only. It does not imply that the first class governs the risk
+  /// category — the engine composes across every class.
+  position      Int    @default(0)
+
+  therapyPlan TherapyPlan @relation(fields: [therapyPlanId], references: [id], onDelete: Cascade)
+
+  @@unique([therapyPlanId, therapyClass])
+  @@index([therapyClass])
+  @@map("therapy_class_assignments")
+}
+
+model TherapyAgent {
+  id            String   @id @default(uuid()) @db.Uuid
+  therapyPlanId String   @map("therapy_plan_id") @db.Uuid
+  /// Anthracycline agents use the identifiers in lib/anthracycline.js so the
+  /// dose ledger can convert them. Other agents are recorded by name.
+  agentId       String?  @map("agent_id")
+  name          String
+  plannedDose   Decimal? @map("planned_dose") @db.Decimal(10, 3)
+  doseUnit      DoseUnit? @map("dose_unit")
+  route         MedicationRoute?
+
+  therapyPlan TherapyPlan @relation(fields: [therapyPlanId], references: [id], onDelete: Cascade)
+
+  @@index([therapyPlanId])
+  @@map("therapy_agents")
+}
+
+model TherapyCycle {
+  id            String      @id @default(uuid()) @db.Uuid
+  therapyPlanId String      @map("therapy_plan_id") @db.Uuid
+  cycleNumber   Int         @map("cycle_number")
+  plannedOn     DateTime?   @map("planned_on") @db.Date
+  administeredOn DateTime?  @map("administered_on") @db.Date
+  status        CycleStatus @default(PLANNED)
+  /// Why a cycle was delayed or omitted. Recorded because surveillance and
+  /// fitness assessments read differently when a cycle was held for a cardiac
+  /// reason rather than a haematological one.
+  deferralReason String?    @map("deferral_reason")
+  toxicityNote   String?    @map("toxicity_note")
+  notes          String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  therapyPlan TherapyPlan         @relation(fields: [therapyPlanId], references: [id], onDelete: Cascade)
+  doses       AnthracyclineDose[]
+
+  @@unique([therapyPlanId, cycleNumber])
+  @@index([therapyPlanId, cycleNumber])
+  @@map("therapy_cycles")
+}
+
+/// The anthracycline dose ledger.
+///
+/// Every administered dose is a row, with the body-surface area it was
+/// normalised against and the equivalence model in force when it was recorded.
+/// A dose that cannot be converted is kept with `conversionFailureReason` set,
+/// never discarded: a cumulative total that silently dropped a dose would
+/// understate the exposure.
+model AnthracyclineDose {
+  id        String  @id @default(uuid()) @db.Uuid
+  patientId String  @map("patient_id") @db.Uuid
+  cycleId   String? @map("cycle_id") @db.Uuid
+  visitId   String? @map("visit_id") @db.Uuid
+
+  agentId     String   @map("agent_id")
+  dose        Decimal  @db.Decimal(10, 3)
+  doseUnit    DoseUnit @default(MG_PER_M2) @map("dose_unit")
+  bsa         Decimal? @db.Decimal(4, 2)
+  cycleNumber Int?     @map("cycle_number")
+  givenOn     DateTime? @map("given_on") @db.Date
+
+  /// The equivalence model that was in force. The published models disagree, so
+  /// a doxorubicin-equivalent total means nothing without knowing which one
+  /// produced it.
+  equivalenceModelId String  @default("feijen2019") @map("equivalence_model_id")
+  conversionFailureReason String? @map("conversion_failure_reason")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  patient Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  cycle   TherapyCycle? @relation(fields: [cycleId], references: [id], onDelete: SetNull)
+  visit   Visit?        @relation(fields: [visitId], references: [id], onDelete: SetNull)
+
+  @@index([patientId, cycleNumber])
+  @@index([patientId, givenOn])
+  @@map("anthracycline_doses")
+}
+
+// ----------------------------------------------------- medication library
+
+/// Medication dictionary. Reference data, not patient data.
+///
+/// Sized for a national formulary rather than a hard-coded shortlist: search is
+/// server-side against generic name, brand name, aliases and resolved
+/// ingredients, and the table is designed to be re-imported as the formulary
+/// changes.
+model Medication {
+  id          String  @id @default(uuid()) @db.Uuid
+  /// Stable identifier from the source formulary, so a re-import updates rather
+  /// than duplicates.
+  externalId  String? @unique @map("external_id")
+  genericName String  @map("generic_name")
+  brandName   String? @map("brand_name")
+  strength    String?
+  dosageForm  String? @map("dosage_form")
+  route       MedicationRoute @default(ORAL)
+  manufacturer String?
+  /// True when the product contains more than one active ingredient.
+  isCombination Boolean @default(false) @map("is_combination")
+  /// Alternative spellings and trade names, searched alongside the names.
+  aliases     String[] @default([])
+  /// Cardiovascular class identifier from lib/medication-engine.js where the
+  /// product maps onto one. Null means the engine classifies it at read time.
+  medicationClass String? @map("medication_class")
+  active      Boolean @default(true)
+
+  /// Lower-cased haystack of the names and aliases, maintained by a trigger
+  /// (see the constraints migration). Not written by the application: a
+  /// generated column would have been cleaner, but array_to_string is only
+  /// STABLE and PostgreSQL will not accept it in a generation expression.
+  searchText String @default("") @map("search_text")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  ingredients        MedicationIngredient[]
+  patientMedications PatientMedication[]
+
+  @@index([genericName])
+  @@index([brandName])
+  @@index([medicationClass])
+  /// Trigram index, so a partial name match is an index scan rather than a
+  /// sequential scan over the whole formulary.
+  @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin, map: "medications_search_trgm_idx")
+  @@map("medications")
+}
+
+model MedicationIngredient {
+  id           String  @id @default(uuid()) @db.Uuid
+  medicationId String  @map("medication_id") @db.Uuid
+  ingredientId String? @map("ingredient_id")
+  name         String
+  strength     String?
+  /// Cardiovascular class of this ingredient, where it has one.
+  ingredientClass String? @map("ingredient_class")
+
+  medication Medication @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+
+  @@index([medicationId])
+  @@index([ingredientId])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "medication_ingredients_name_trgm_idx")
+  @@map("medication_ingredients")
+}
+
+/// A medicine this patient is on.
+///
+/// Frequency is stored as the four structured slots the service writes on a
+/// prescription — 1-0-0-1 means one in the morning and one at night — rather
+/// than as a free-text dose string, so that duplication and QT-stacking checks
+/// have something to compute against.
+model PatientMedication {
+  id           String  @id @default(uuid()) @db.Uuid
+  patientId    String  @map("patient_id") @db.Uuid
+  medicationId String? @map("medication_id") @db.Uuid
+
+  /// Name as displayed. Populated from the dictionary entry when there is one,
+  /// and typed by the clinician when the product is not yet in the formulary.
+  displayName String  @map("display_name")
+  /// Cardiovascular class. Resolved from the dictionary or classified from the
+  /// name; the engine reads this.
+  medicationClass String? @map("medication_class")
+
+  strength     String?
+  doseAmount   Decimal? @map("dose_amount") @db.Decimal(10, 3)
+  doseUnit     String?  @map("dose_unit")
+
+  morning   Decimal @default(0) @db.Decimal(5, 2)
+  afternoon Decimal @default(0) @db.Decimal(5, 2)
+  evening   Decimal @default(0) @db.Decimal(5, 2)
+  night     Decimal @default(0) @db.Decimal(5, 2)
+  /// Free-text frequency for regimens the four slots cannot express, such as
+  /// alternate days or weekly dosing.
+  frequencyNote String? @map("frequency_note")
+
+  route        MedicationRoute @default(ORAL)
+  foodRelation FoodRelation    @default(NOT_SPECIFIED) @map("food_relation")
+
+  indication String?
+  notes      String?
+
+  startedOn DateTime? @map("started_on") @db.Date
+  stoppedOn DateTime? @map("stopped_on") @db.Date
+  stopReason String?  @map("stop_reason")
+  active    Boolean   @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  patient    Patient     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  medication Medication? @relation(fields: [medicationId], references: [id], onDelete: SetNull)
+
+  @@index([patientId, active])
+  @@map("patient_medications")
+}
+
+// ----------------------------------------------------------------- visits
+
+model Visit {
+  id        String @id @default(uuid()) @db.Uuid
+  patientId String @map("patient_id") @db.Uuid
+  clinicianId String? @map("clinician_id") @db.Uuid
+
+  /// Visit type identifier from lib/visit-types.js. Held as text rather than an
+  /// enum because the visit-type vocabulary is a clinical definition that
+  /// belongs in versioned application code.
+  visitType   String      @map("visit_type")
+  /// Label as displayed, e.g. "Cycle 3". Retained because the engines derive the
+  /// cycle number from it on legacy records.
+  label       String?
+  cycleNumber Int?        @map("cycle_number")
+  occurredOn  DateTime    @map("occurred_on") @db.Date
+  status      VisitStatus @default(DRAFT)
+  filedAt     DateTime?   @map("filed_at")
+
+  // First OPD review block. A small fixed set of fields, so columns.
+  tolerance        String?
+  interimEvents    String? @map("interim_events")
+  admissions       String?
+  clinicalConcerns String? @map("clinical_concerns")
+  earlyToxicity    String? @map("early_toxicity")
+
+  heartFailureStatus String? @map("heart_failure_status")
+  medicationReview   String? @map("medication_review")
+  plan               String?
+  notes              String?
+  nextFollowUpOn     DateTime? @map("next_follow_up_on") @db.Date
+  /// The generated encounter summary, stored as filed. Regenerating it later
+  /// from today's engines would change what the record says was written.
+  generatedSummary   String? @map("generated_summary")
+
+  legacyId String? @map("legacy_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  patient   Patient    @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  clinician Clinician? @relation(fields: [clinicianId], references: [id], onDelete: SetNull)
+
+  vitals              VisitVitals?
+  symptoms            VisitSymptom[]
+  systemExams         VisitSystemExam[]
+  intervalAnswers     VisitIntervalAnswer[]
+  taskCompletions     VisitTaskCompletion[]
+  medicationDecisions VisitMedicationDecision[]
+  investigations      Investigation[]
+  anthracyclineDoses  AnthracyclineDose[]
+  assessments         Assessment[]
+  surveillance        SurveillanceRecommendation[]
+  followUps           FollowUp[]
+  overrides           ClinicalOverride[]
+
+  @@unique([patientId, legacyId], name: "visit_legacy_identity")
+  @@index([patientId, occurredOn(sort: Desc)])
+  @@index([patientId, status])
+  @@index([nextFollowUpOn])
+  @@map("visits")
+}
+
+model VisitVitals {
+  visitId String @id @map("visit_id") @db.Uuid
+
+  heightCm        Decimal? @map("height_cm") @db.Decimal(5, 1)
+  weightKg        Decimal? @map("weight_kg") @db.Decimal(5, 2)
+  referenceWeightKg Decimal? @map("reference_weight_kg") @db.Decimal(5, 2)
+  systolicBp      Int?     @map("systolic_bp")
+  diastolicBp     Int?     @map("diastolic_bp")
+  pulse           Int?
+  respiratoryRate Int?     @map("respiratory_rate")
+  spo2            Int?
+  temperatureC    Decimal? @map("temperature_c") @db.Decimal(4, 1)
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@map("visit_vitals")
+}
+
+model VisitSymptom {
+  id      String @id @default(uuid()) @db.Uuid
+  visitId String @map("visit_id") @db.Uuid
+  /// Symptom label from lib/clinical-data.js (SYMPTOMS).
+  symptom String
+
+  severity   String?
+  duration   String?
+  trigger    String?
+  radiation  String?
+  associated String?
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@unique([visitId, symptom])
+  @@index([symptom])
+  @@map("visit_symptoms")
+}
+
+model VisitSystemExam {
+  id       String           @id @default(uuid()) @db.Uuid
+  visitId  String           @map("visit_id") @db.Uuid
+  systemId String           @map("system_id")
+  status   SystemExamStatus @default(NOT_EXAMINED)
+
+  visit      Visit                      @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  components VisitSystemExamComponent[]
+
+  @@unique([visitId, systemId])
+  @@map("visit_system_exams")
+}
+
+model VisitSystemExamComponent {
+  id          String  @id @default(uuid()) @db.Uuid
+  systemExamId String @map("system_exam_id") @db.Uuid
+  componentId String  @map("component_id")
+  normal      Boolean @default(false)
+  findings    String?
+
+  systemExam VisitSystemExam @relation(fields: [systemExamId], references: [id], onDelete: Cascade)
+
+  @@unique([systemExamId, componentId])
+  @@map("visit_system_exam_components")
+}
+
+/// Structured interval history. Item identifiers come from
+/// lib/visit-types.js (SINCE_LAST_VISIT_ITEMS); several of them escalate the
+/// follow-up acuity on their own, so they are rows rather than prose.
+model VisitIntervalAnswer {
+  id      String  @id @default(uuid()) @db.Uuid
+  visitId String  @map("visit_id") @db.Uuid
+  itemId  String  @map("item_id")
+  present Boolean @default(false)
+  detail  String?
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@unique([visitId, itemId])
+  @@map("visit_interval_answers")
+}
+
+/// Which surveillance tasks the clinician marked done at this visit.
+model VisitTaskCompletion {
+  id        String  @id @default(uuid()) @db.Uuid
+  visitId   String  @map("visit_id") @db.Uuid
+  taskId    String  @map("task_id")
+  completed Boolean @default(false)
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@unique([visitId, taskId])
+  @@map("visit_task_completions")
+}
+
+/// What the clinician did with each cardioprotective recommendation. Recorded
+/// so that "deferred" is a documented decision rather than an absence.
+model VisitMedicationDecision {
+  id               String  @id @default(uuid()) @db.Uuid
+  visitId          String  @map("visit_id") @db.Uuid
+  recommendationId String  @map("recommendation_id")
+  decision         String
+  note             String?
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@unique([visitId, recommendationId])
+  @@map("visit_medication_decisions")
+}
+
+// --------------------------------------------------------- investigations
+
+/// Every investigation result, cardiac or otherwise, in one longitudinal table.
+///
+/// One table rather than two: an LVEF recorded as an "investigation" and the
+/// same LVEF recorded as a "cardiac measurement" would be two versions of one
+/// fact that can disagree. The cardiac-specific columns below are nullable and
+/// used only by the measurements that need them, and the cardiac-measurement
+/// API is a query over this table filtered to the cardiac identifiers.
+model Investigation {
+  id        String  @id @default(uuid()) @db.Uuid
+  patientId String  @map("patient_id") @db.Uuid
+  visitId   String? @map("visit_id") @db.Uuid
+
+  /// Identifier from lib/clinical-data.js (INVESTIGATIONS).
+  investigationId String   @map("investigation_id")
+  measuredOn      DateTime? @map("measured_on") @db.Date
+
+  /// Free-text result, kept for the investigations that are reported as prose.
+  resultText   String?  @map("result_text")
+  /// Parsed numeric value where the investigation is numeric. Indexed, because
+  /// this is what trends and thresholds read.
+  numericValue Decimal? @map("numeric_value") @db.Decimal(12, 3)
+  unit         String?
+  interpretation String? @map("interpretation")
+  comment      String?
+
+  /// True for the value that defines this patient's baseline for the measure.
+  isBaseline Boolean @default(false) @map("is_baseline")
+
+  // ---- cardiac-specific provenance, null for everything else ----
+
+  /// Assay identifier for troponin. Values from different assays are not
+  /// comparable, so the assay travels with the value.
+  assayId             String?  @map("assay_id")
+  /// The upper reference limit that was actually applied to this value.
+  referenceUpperLimit Decimal? @map("reference_upper_limit") @db.Decimal(12, 3)
+  laboratory          String?
+
+  /// ECG interval measurements (RR, QT, heart rate, rhythm) as entered. JSON
+  /// because the set of intervals recorded varies by machine and by what the
+  /// reporter measured, and no engine queries across them.
+  measurements Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  visit   Visit?  @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@unique([visitId, investigationId])
+  @@index([patientId, investigationId, measuredOn(sort: Desc)])
+  @@index([patientId, isBaseline])
+  @@map("investigations")
+}
+
+// ------------------------------------------------------------ assessments
+
+/// A computed clinical result, stored with the inputs and the engine version
+/// that produced it.
+///
+/// Never recomputed in place. Re-running a two-year-old assessment against
+/// today's engine would silently rewrite what the software said at the time,
+/// and a clinician reading the record back needs the version that was actually
+/// acted on.
+model Assessment {
+  id        String  @id @default(uuid()) @db.Uuid
+  patientId String  @map("patient_id") @db.Uuid
+  visitId   String? @map("visit_id") @db.Uuid
+  therapyPlanId String? @map("therapy_plan_id") @db.Uuid
+
+  kind AssessmentKind
+
+  /// Engine identifier, e.g. "hfa-icos", and the version of that engine.
+  engine        String
+  engineVersion String @map("engine_version")
+  /// The CORSC rules version (lib/clinical-sources.js RULES_VERSION).
+  rulesVersion  String @map("rules_version")
+
+  /// Headline category, e.g. "High" for baseline risk or "moderate" for a CTRCD
+  /// grade. Denormalised out of `result` so that the worklist and trend queries
+  /// do not have to open the document.
+  category String?
+  score    Decimal? @db.Decimal(8, 2)
+
+  /// The engine's full output, and the inputs it was given.
+  ///
+  /// JSON is correct here and only here: the shape is the engine's return
+  /// value, it differs per engine, and it is written once and read back
+  /// verbatim. Promoting it to columns would freeze one engine's output shape
+  /// into the schema and force a migration every time an engine gains a field.
+  result Json
+  inputs Json
+
+  /// Verification level of the source that governed this result, copied from
+  /// the engine's provenance so a stored assessment can still state whether the
+  /// rule behind it was fully verified.
+  verification String?
+
+  computedAt   DateTime @default(now()) @map("computed_at")
+  computedById String?  @map("computed_by_id") @db.Uuid
+
+  patient    Patient    @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  visit      Visit?     @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  computedBy Clinician? @relation(fields: [computedById], references: [id], onDelete: SetNull)
+
+  @@index([patientId, kind, computedAt(sort: Desc)])
+  @@index([patientId, visitId])
+  @@map("assessments")
+}
+
+// ---------------------------------------------------------- surveillance
+
+/// A surveillance recommendation, with the reason it fired.
+///
+/// Every row must be explainable: what is due, when, why, on whose authority,
+/// and which engine version decided. "Echo due" with no `reason` and no
+/// `sourceId` is not an acceptable record.
+model SurveillanceRecommendation {
+  id        String  @id @default(uuid()) @db.Uuid
+  patientId String  @map("patient_id") @db.Uuid
+  visitId   String? @map("visit_id") @db.Uuid
+  therapyPlanId String? @map("therapy_plan_id") @db.Uuid
+
+  /// Task identifier from lib/surveillance-rules.js.
+  taskId       String  @map("task_id")
+  label        String
+  /// The investigation this task calls for, where it maps onto one.
+  investigationId String? @map("investigation_id")
+  priority     String
+  dueOn        DateTime? @map("due_on") @db.Date
+  dueDescription String? @map("due_description")
+
+  /// Why this fired, in the engine's own words.
+  reason String
+  /// Which clinical source the rule came from, and whether it is a guideline
+  /// recommendation or a CORSC operational scheduling rule.
+  sourceId     String? @map("source_id")
+  sourceLocator String? @map("source_locator")
+  verification String?
+  /// Set when this recommendation was escalated above the routine interval.
+  escalationReason String? @map("escalation_reason")
+
+  /// The risk category and toxicity grade in force when this was generated, so
+  /// the recommendation can be read back without re-deriving the state.
+  riskCategory   String? @map("risk_category")
+  toxicityGrade  String? @map("toxicity_grade")
+
+  engine        String
+  engineVersion String @map("engine_version")
+  rulesVersion  String @map("rules_version")
+
+  status        SurveillanceStatus @default(DUE)
+  completedOn   DateTime?          @map("completed_on") @db.Date
+  completedById String?            @map("completed_by_id") @db.Uuid
+  completionNote String?           @map("completion_note")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  patient     Patient    @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  visit       Visit?     @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  completedBy Clinician? @relation(fields: [completedById], references: [id], onDelete: SetNull)
+
+  @@index([patientId, status, dueOn])
+  @@index([dueOn, status])
+  @@map("surveillance_recommendations")
+}
+
+model FollowUp {
+  id        String  @id @default(uuid()) @db.Uuid
+  patientId String  @map("patient_id") @db.Uuid
+  visitId   String? @map("visit_id") @db.Uuid
+
+  followUpType String    @map("follow_up_type")
+  /// Acuity band identifier from lib/acuity.js.
+  acuity       String?
+  plannedOn    DateTime? @map("planned_on") @db.Date
+  actualOn     DateTime? @map("actual_on") @db.Date
+  /// Every trigger that contributed to this interval.
+  reasons      String[]  @default([])
+  status       FollowUpStatus @default(PLANNED)
+
+  engine        String?
+  engineVersion String? @map("engine_version")
+  rulesVersion  String? @map("rules_version")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  visit   Visit?  @relation(fields: [visitId], references: [id], onDelete: SetNull)
+
+  @@index([patientId, plannedOn])
+  @@map("follow_ups")
+}
+
+// ------------------------------------------------------------- overrides
+
+/// A clinician override of an engine result.
+///
+/// Additive: `algorithmicValue` is retained unchanged, so the record shows both
+/// what the software said and what the clinician decided. There is no update
+/// path — an override is withdrawn, which is itself recorded, never edited.
+model ClinicalOverride {
+  id        String  @id @default(uuid()) @db.Uuid
+  patientId String  @map("patient_id") @db.Uuid
+  visitId   String? @map("visit_id") @db.Uuid
+
+  /// What was overridden, from lib/overrides.js (OVERRIDABLE).
+  target    String
+  /// Which instance, where the target is a list — a specific surveillance task,
+  /// for example.
+  subjectId String? @map("subject_id")
+
+  algorithmicValue String? @map("algorithmic_value")
+  clinicianValue   String  @map("clinician_value")
+  reason           String
+
+  clinicianId String   @map("clinician_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  withdrawnAt     DateTime? @map("withdrawn_at")
+  withdrawnById   String?   @map("withdrawn_by_id") @db.Uuid
+  withdrawnReason String?   @map("withdrawn_reason")
+
+  patient      Patient    @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  visit        Visit?     @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  clinician    Clinician  @relation("OverrideAuthor", fields: [clinicianId], references: [id])
+  withdrawnBy  Clinician? @relation("OverrideWithdrawnBy", fields: [withdrawnById], references: [id], onDelete: SetNull)
+
+  @@index([patientId, createdAt(sort: Desc)])
+  @@index([patientId, target, subjectId])
+  @@map("clinical_overrides")
+}
+
+// ------------------------------------------------------------- audit log
+
+/// Append-only audit trail.
+///
+/// Records that a field changed, by whom and when. Values are copied only for
+/// the fields declared auditable in lib/audit-log.js; everything else is
+/// recorded as changed without its content being duplicated, so the audit log
+/// does not become a second copy of the clinical narrative under different
+/// access rules.
+///
+/// There is no update or delete path in the application or in the row-level
+/// security policies. A correction is a new row.
+model AuditEvent {
+  id        String  @id @default(uuid()) @db.Uuid
+  patientId String? @map("patient_id") @db.Uuid
+  actorId   String? @map("actor_id") @db.Uuid
+
+  action   String
+  category String
+  entity   String?
+  entityId String? @map("entity_id")
+  field    String?
+
+  previousValue String? @map("previous_value")
+  newValue      String? @map("new_value")
+  reason        String?
+  detail        String?
+
+  /// Correlates every row written while serving one request.
+  requestId String? @map("request_id")
+
+  occurredAt DateTime @default(now()) @map("occurred_at")
+
+  patient Patient?   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  actor   Clinician? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([patientId, occurredAt(sort: Desc)])
+  @@index([actorId, occurredAt(sort: Desc)])
+  @@index([category, occurredAt(sort: Desc)])
+  @@map("audit_events")
+}
+
+// -------------------------------------------------------- legacy imports
+
+/// One row per record offered to the browser-storage migration.
+///
+/// The migration is not allowed to be silent. Every legacy record is accounted
+/// for as imported, skipped as a duplicate, failed, or flagged for human
+/// review, and the reason is kept.
+model LegacyImport {
+  id          String  @id @default(uuid()) @db.Uuid
+  clinicianId String  @map("clinician_id") @db.Uuid
+  patientId   String? @map("patient_id") @db.Uuid
+
+  legacyId String              @map("legacy_id")
+  outcome  LegacyImportOutcome
+  /// Why the record was skipped or needs review. Deliberately not the record
+  /// itself: a failed import must not park identifiable data in a log table.
+  reason   String?
+  /// Field names that could not be confidently mapped. The values are not
+  /// copied.
+  unmappedFields String[] @default([]) @map("unmapped_fields")
+
+  visitsImported Int @default(0) @map("visits_imported")
+  importedAt     DateTime @default(now()) @map("imported_at")
+
+  clinician Clinician @relation(fields: [clinicianId], references: [id], onDelete: Cascade)
+  patient   Patient?  @relation(fields: [patientId], references: [id], onDelete: SetNull)
+
+  @@unique([clinicianId, legacyId])
+  @@index([clinicianId, outcome])
+  @@map("legacy_imports")
+}
