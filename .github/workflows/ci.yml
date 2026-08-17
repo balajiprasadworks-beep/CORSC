@@ -18,6 +18,12 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Placeholders. The build and the tests must never depend on real
+  # credentials, and CI must never be given any.
+  NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-placeholder-not-a-secret
+
 jobs:
   clinical-engines:
     name: Clinical engine tests
@@ -41,7 +47,78 @@ jobs:
         run: npx vitest run lib/hfa-icos.test.js
 
       - name: Remaining clinical engine tests
-        run: npx vitest run
+        run: npx vitest run lib smoke
+
+  database:
+    name: Database, API and integration tests
+    runs-on: ubuntu-latest
+    needs: clinical-engines
+
+    # An ephemeral PostgreSQL, created and destroyed with the job. Production
+    # credentials are never available to CI and nothing here should ever be
+    # pointed at a real database.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: corsc
+          POSTGRES_PASSWORD: corsc
+          POSTGRES_DB: corsc_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://corsc:corsc@localhost:5432/corsc_test
+      DIRECT_URL: postgresql://corsc:corsc@localhost:5432/corsc_test
+      # Turns a skipped database suite into a failure. Without this, a
+      # misconfigured job would report green by simply not running the tests
+      # that matter most.
+      CORSC_REQUIRE_DB: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate the Prisma schema
+        run: npx prisma validate
+
+      # Applies the committed migrations rather than pushing the schema, so CI
+      # exercises the same path a deployment takes. A migration that is missing
+      # from the repository fails here.
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      # `migrate diff` against the applied database must produce nothing. This
+      # catches a schema.prisma change that was never turned into a migration —
+      # which would work locally and fail on deployment.
+      - name: Check the schema and the migrations agree
+        run: |
+          npx prisma migrate diff \
+            --from-schema-datasource prisma/schema.prisma \
+            --to-schema-datamodel prisma/schema.prisma \
+            --exit-code \
+          && echo "Schema and migrations agree."
+
+      - name: Import the medication formulary
+        run: npm run db:import-formulary
+
+      - name: Seed synthetic development data
+        run: npm run db:seed
+
+      - name: Database, API and integration tests
+        run: npx vitest run tests
 
   checks:
     name: Lint, types and build
@@ -65,8 +142,3 @@ jobs:
       # a standalone tsc invocation needs, so the build is the typecheck.
       - name: Build
         run: npm run build
-        env:
-          # Placeholder values: the build must not depend on real credentials,
-          # and CI must never be given any.
-          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
-          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-placeholder-not-a-secret

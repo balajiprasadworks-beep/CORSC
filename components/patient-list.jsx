@@ -20,7 +20,7 @@ import { AlertTriangle, Clock, Heart, Plus, Search } from "lucide-react";
 
 import { EmptyState, StatusChip, flagStyle, mono, serif } from "@/components/kit";
 import { APP_FULL_NAME, APP_NAME, riskStyle } from "@/lib/clinical-data";
-import { FILTER_LIST, buildWorklist } from "@/lib/worklist";
+import { FILTER_LIST, buildWorklist, buildWorklistFromRows } from "@/lib/worklist";
 
 function RowMetric({ label, value, tone }) {
   return (
@@ -31,11 +31,26 @@ function RowMetric({ label, value, tone }) {
   );
 }
 
-export function PatientList({ patients, onSelect, onNew }) {
+/**
+ * @param {object}   props
+ * @param {Array}    [props.rows]     worklist rows already built by the server
+ * @param {Array}    [props.patients] full records, for the browser-storage fallback
+ *
+ * Rows are preferred: the engines then run once, on the server, against the
+ * database. `patients` remains supported for the local-storage driver, where
+ * there is no server to run them.
+ */
+export function PatientList({ rows, patients, onSelect, onNew, banner }) {
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState([]);
 
-  const worklist = useMemo(() => buildWorklist(patients, { filters, search: query }), [patients, filters, query]);
+  const worklist = useMemo(
+    () =>
+      rows
+        ? buildWorklistFromRows(rows, { filters, search: query })
+        : buildWorklist(patients, { filters, search: query }),
+    [rows, patients, filters, query]
+  );
 
   function toggleFilter(id) {
     setFilters((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
@@ -125,6 +140,12 @@ export function PatientList({ patients, onSelect, onNew }) {
             })}
           </div>
         </div>
+
+        {/* Where the records are being kept, and the migration prompt. Shown
+            with the caseload rather than tucked into a settings screen: a
+            clinician entering identifiable data needs to know it is going
+            somewhere durable before they enter it, not afterwards. */}
+        {banner ? <div className="mt-4">{banner}</div> : null}
 
         <div className="mt-4 space-y-2.5">
           {worklist.rows.length === 0 && (
