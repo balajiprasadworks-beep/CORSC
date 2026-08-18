@@ -391,7 +391,17 @@ export function PrintReport({ patient, encounter, picture, summary }) {
           <div><strong>{patient.name || "Unnamed patient"}</strong></div>
           <div>Patient ID: {patient.patientId || "—"}</div>
           <div>Encounter: {encounter.type} · {encounter.date}</div>
-          <div>Printed: {new Date().toLocaleDateString()}</div>
+
+<div>
+  Printed:{" "}
+  {new Date().toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+  })}
+</div>
+
         </div>
       </header>
 
