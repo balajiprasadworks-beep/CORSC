@@ -8,7 +8,7 @@
    ========================================================================= */
 
 import { useState } from "react";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 
 import { RegistrationFields, applyRegistrationChange } from "@/components/sections/registration";
 import { serif } from "@/components/kit";
@@ -16,15 +16,21 @@ import { createEncounter, createPatient, todayISO } from "@/lib/patient-model";
 
 export function RegisterPatient({ onCancel, onCreate }) {
   const [draft, setDraft] = useState(() => applyRegistrationChange(createPatient({}), {}));
-  const canRegister = Boolean(draft.name && draft.diagnosis && draft.therapy);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const canRegister = Boolean(draft.name && draft.diagnosis && draft.therapy) && !isSubmitting;
 
-  function submit() {
-    if (!canRegister) return;
-    onCreate({
-      ...draft,
-      registeredDate: todayISO(),
-      draftEncounter: createEncounter("Baseline", { date: todayISO() }),
-    });
+  async function submit() {
+    if (!canRegister || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await onCreate({
+        ...draft,
+        registeredDate: todayISO(),
+        draftEncounter: createEncounter("Baseline", { date: todayISO() }),
+      });
+    } catch {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -74,10 +80,23 @@ export function RegisterPatient({ onCancel, onCreate }) {
               canRegister ? "bg-slate-900 text-white hover:bg-slate-800" : "cursor-not-allowed bg-slate-200 text-slate-400"
             }`}
           >
-            Register and open workflow <ArrowRight size={17} aria-hidden="true" />
+            {isSubmitting ? (
+              <>
+                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                Registering patient...
+              </>
+            ) : (
+              <>
+                Register and open workflow <ArrowRight size={17} aria-hidden="true" />
+              </>
+            )}
           </button>
           <p className="mt-2 text-center text-[12px] text-slate-400">
-            {canRegister ? "Ready to register." : "Name, diagnosis and planned therapy are required."}
+            {isSubmitting
+              ? "Creating patient record and opening workflow..."
+              : canRegister
+                ? "Ready to register."
+                : "Name, diagnosis and planned therapy are required."}
           </p>
         </div>
       </div>

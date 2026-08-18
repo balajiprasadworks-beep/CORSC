@@ -149,13 +149,21 @@ function CORSCWorkspace({ user, onSignOut }) {
     try {
       const result = await patientRepository(driver).create(user.id, patient);
       updatedAt.current = result.updatedAt ?? null;
-      setSelected(result.patient ?? patient);
+      const createdPatient = result?.patient ?? result ?? patient;
+      const withDraft = createdPatient?.draftEncounter
+        ? createdPatient
+        : {
+            ...createdPatient,
+            draftEncounter: patient.draftEncounter || createEncounter("Baseline", { date: todayISO() }),
+          };
+      setSelected(withDraft);
       setSaveState("saved");
       setView("workflow");
       loadCaseload(driver);
     } catch (error) {
       setSaveState("error");
       setSaveError(error.message || "The patient could not be registered.");
+      throw error;
     }
   }
 
