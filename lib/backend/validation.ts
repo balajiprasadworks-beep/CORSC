@@ -734,6 +734,16 @@ export const assessSchema = z.object({
   therapyPlanId: uuid.nullish(),
 });
 
+/* ------------------------------------------------------------------- ai */
+
+export const extractNoteSchema = z.object({
+  noteText: text(8000).min(1, "Paste a note to extract from."),
+});
+
+export const draftNoteSchema = z.object({
+  context: text(8000).min(1, "Nothing to draft a note from yet."),
+});
+
 /* ----------------------------------------------------------- surveillance */
 
 export const completeSurveillanceSchema = z.object({

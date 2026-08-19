@@ -24,6 +24,7 @@ import {
   mono,
 } from "@/components/kit";
 import { AnthracyclineLedger } from "@/components/anthracycline-ledger";
+import { NoteExtractionPanel } from "@/components/ai-note-tools";
 import { FIRST_REVIEW_FIELDS, SYMPTOMS, TOLERANCE_OPTIONS } from "@/lib/clinical-data";
 import { therapyList } from "@/lib/hfa-icos";
 import { num } from "@/lib/vitals";
@@ -88,6 +89,8 @@ export function FirstReviewSection({ patient, setPatient, encounter, setEncounte
 
   return (
     <Stack gap="gap-4">
+      <NoteExtractionPanel patientId={patient.id} setEncounter={setEncounter} />
+
       <Panel title="Where is the patient in treatment?" subtitle="Sets the surveillance protocol for this encounter">
         <Stack>
           <Field label="Visit type">
