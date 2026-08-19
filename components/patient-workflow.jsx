@@ -436,6 +436,8 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
           cycle={currentCycle(patient, encounter)}
           risk={picture.currentRisk}
           latestLVEF={latestLVEF(patient, encounter)}
+          treatmentPhase={picture.activeTreatmentPhase}
+          treatmentPhasePosition={picture.treatmentPhasePosition}
           saveState={saveState}
           onBack={onBack}
           sections={sections}

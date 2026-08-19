@@ -40,6 +40,8 @@ export function StickyPatientHeader({
   cycle,
   risk,
   latestLVEF,
+  treatmentPhase,
+  treatmentPhasePosition,
   saveState,
   onBack,
   sections,
@@ -47,6 +49,10 @@ export function StickyPatientHeader({
   onJump,
 }) {
   const styles = riskStyle(risk);
+  const phaseLabel =
+    treatmentPhase && treatmentPhasePosition?.total > 1
+      ? `Phase ${treatmentPhasePosition.index} of ${treatmentPhasePosition.total} · ${treatmentPhase.name}`
+      : treatmentPhase?.name || null;
 
   const facts = [
     { label: "Patient ID", value: patient.patientId || "—" },
@@ -76,6 +82,11 @@ export function StickyPatientHeader({
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="truncate text-[15px] font-semibold text-slate-900">{patient.name || "Unnamed patient"}</span>
               <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${styles.bg} ${styles.text}`}>{risk}</span>
+              {phaseLabel && (
+                <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-semibold text-teal-700">
+                  {phaseLabel}
+                </span>
+              )}
             </div>
             <div className="truncate text-[12px] text-slate-500">
               {[patient.diagnosis, patient.stage].filter(Boolean).join(" · ") || "Diagnosis not recorded"}

@@ -249,6 +249,63 @@ const documentVisitSchema = z
   })
   .passthrough();
 
+/* ------------------------------------------------------- treatment course */
+
+/**
+ * One agent within a phase.
+ *
+ * `therapyClass` is the regimen library's own vocabulary and is accepted as
+ * free text on purpose: it is descriptive metadata, not something an engine
+ * branches on. `corscTherapyClass` is the one field that does drive clinical
+ * behaviour, so it alone is checked against the controlled vocabulary.
+ */
+const treatmentAgentSchema = z
+  .object({
+    genericName: text(120).min(1, "An agent needs a name."),
+    drugClass: optionalText(120),
+    therapyClass: optionalText(120),
+    corscTherapyClass: vocabulary(THERAPY_IDS, "therapy class").nullish(),
+    role: optionalText(60),
+  })
+  .passthrough();
+
+const treatmentPhaseSchema = z
+  .object({
+    id: text(120).min(1),
+    name: optionalText(160),
+    sequence: clinicalNumber({ min: 0, max: 50, label: "Phase sequence" }).nullish(),
+    agents: z.array(treatmentAgentSchema).max(20).default([]),
+    plannedCycles: clinicalNumber({ min: 0, max: 200, label: "Phase planned cycles" }).nullish(),
+    duration: optionalText(160),
+    schedule: optionalText(200),
+    maintenance: z.boolean().optional(),
+    transitionCondition: optionalText(400),
+    /** When this phase first became active. Set once, by the client, never by a parsed date guess. */
+    activatedOn: optionalDate,
+  })
+  .passthrough();
+
+/**
+ * The structured treatment course.
+ *
+ * `freeTextDescription` is deliberately generous at 2000 characters and is
+ * never parsed. It is the clinician's own account of a regimen that does not
+ * fit the library, and truncating it would lose clinical detail that nothing
+ * else in the record carries.
+ */
+export const treatmentCourseSchema = z
+  .object({
+    entryMethod: z.enum(["preset", "builder", "freeText"]).default("freeText"),
+    regimenId: optionalText(120),
+    regimenFamily: optionalText(200),
+    protocolVariant: optionalText(200),
+    freeTextDescription: optionalText(2000),
+    phases: z.array(treatmentPhaseSchema).max(12).default([]),
+    activePhaseId: optionalText(120),
+    libraryVersion: optionalText(60),
+  })
+  .passthrough();
+
 export const patientDocumentSchema = z
   .object({
     name: text(200).min(1, "A patient name is required."),
@@ -264,6 +321,7 @@ export const patientDocumentSchema = z
     stage: optionalText(80),
 
     regimen: optionalText(200),
+    treatmentCourse: treatmentCourseSchema.nullish(),
     therapy: z.array(vocabulary(THERAPY_IDS, "therapy class")).max(12).optional(),
     plannedCycles: clinicalNumber({ min: 1, max: 200, label: "Planned cycles" }).nullish(),
     cycleFrequency: optionalText(80),

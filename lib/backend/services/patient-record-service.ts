@@ -46,6 +46,7 @@ import { diffFields, recordAudit, recordAuditBatch, type AuditInput } from "@/li
 import { enginePatientInclude, toEnginePatientRecord } from "@/lib/backend/services/engine-patient";
 import { ANTHRACYCLINE_AGENTS } from "@/lib/anthracycline";
 import { THERAPY_CLASSES, INVESTIGATIONS, SYMPTOMS } from "@/lib/clinical-data";
+import { phaseTransitionReason } from "@/lib/treatment-course";
 import { RISK_FACTOR_IDS as KNOWN_RISK_FACTOR_IDS } from "@/lib/backend/validation";
 import { classifyDrug } from "@/lib/medication-engine";
 
@@ -264,6 +265,21 @@ export async function writePatientRecord(
       previous: before.risk?.category,
       next: engineAfter.risk?.category,
       detail: "Recalculated from the recorded data. Not a clinician override.",
+    });
+  }
+
+  const phaseTransition = detectPhaseTransition(before.treatmentCourse, engineAfter.treatmentCourse);
+  if (phaseTransition) {
+    audits.push({
+      ...auditBase,
+      action: "therapyChanged",
+      category: "clinical",
+      entity: "TherapyPhase",
+      entityId: patientId,
+      field: "activePhase",
+      previous: phaseTransition.from.name,
+      next: phaseTransition.to.name,
+      detail: phaseTransition.reason,
     });
   }
 
@@ -497,6 +513,7 @@ async function writeTherapy(
   const therapyKeys = [
     "therapy",
     "regimen",
+    "treatmentCourse",
     "plannedCycles",
     "cycleFrequency",
     "cycle",
@@ -514,12 +531,18 @@ async function writeTherapy(
     .map((value) => String(value))
     .filter((value) => THERAPY_IDS.has(value));
 
+  const course = document.treatmentCourse ? record(document.treatmentCourse) : null;
+
   const data = {
     regimen: toText(document.regimen, 200),
     plannedCycles: clamp(toInteger(document.plannedCycles), 1, 200),
     cycleFrequency: toText(document.cycleFrequency, 80),
     currentCycle: clamp(toInteger(document.cycle), 0, 200) ?? 0,
     plannedCumulativeDose: clamp(toNumber(document.totalPlannedDose), 0, 5000),
+    entryMethod: course ? toText(course.entryMethod, 20) : null,
+    regimenLibraryId: course ? toText(course.regimenId, 120) : null,
+    regimenFamily: course ? toText(course.regimenFamily, 200) : null,
+    activePhaseKey: course ? toText(course.activePhaseId, 120) : null,
   };
 
   const existing = await tx.therapyPlan.findFirst({
@@ -542,7 +565,103 @@ async function writeTherapy(
     });
   }
 
+  if ("treatmentCourse" in document) await writeTreatmentPhases(tx, plan.id, course);
+
   return plan.id;
+}
+
+type EnginePhase = { id: string; name: string; agents: unknown[] };
+type EngineCourse = { activePhaseId: string | null; phases: EnginePhase[] } | null | undefined;
+
+/**
+ * Whether this write moved the patient onto a different active phase, and
+ * why that matters clinically.
+ *
+ * Read from the before/after engine records rather than the raw request body,
+ * so this fires exactly once per write regardless of how many other fields
+ * changed alongside the phase, and never fires from a phase id that was sent
+ * but did not actually take effect (an unknown id, for instance).
+ *
+ * Deliberately silent when either side cannot be resolved to a phase — a
+ * course moving from unstructured to structured for the first time is not a
+ * transition between two named phases, it is the course being built, and the
+ * generic `patientEdited` audit already covers that.
+ */
+function detectPhaseTransition(
+  before: EngineCourse,
+  after: EngineCourse
+): { from: EnginePhase; to: EnginePhase; reason: string } | null {
+  if (!before || !after) return null;
+  if (before.activePhaseId === after.activePhaseId) return null;
+
+  const from = before.phases.find((phase) => phase.id === before.activePhaseId);
+  const to = after.phases.find((phase) => phase.id === after.activePhaseId);
+  if (!from || !to) return null;
+
+  return { from, to, reason: phaseTransitionReason(from, to) };
+}
+
+/**
+ * Replaces the phases of a course.
+ *
+ * Replaced rather than merged: the phases are one structure the clinician
+ * edits as a whole, and a merge would leave a phase behind that they had
+ * deleted. The cascade takes the agents with it.
+ *
+ * A free-text course writes no phases at all. That is the storage-level
+ * expression of the rule that CORSC does not parse regimen text — there is no
+ * path here that invents a phase from `freeTextDescription`.
+ */
+async function writeTreatmentPhases(
+  tx: Prisma.TransactionClient,
+  therapyPlanId: string,
+  course: Record<string, unknown> | null
+): Promise<void> {
+  await tx.therapyPhase.deleteMany({ where: { therapyPlanId } });
+
+  const phases = course && course.entryMethod !== "freeText" ? list(course.phases) : [];
+  if (phases.length === 0) return;
+
+  let position = 0;
+  for (const raw of phases) {
+    const phase = record(raw);
+    const key = toText(phase.id, 120);
+    if (!key) continue;
+
+    const created = await tx.therapyPhase.create({
+      data: {
+        therapyPlanId,
+        key,
+        name: toText(phase.name, 160) || `Phase ${position + 1}`,
+        position,
+        plannedCycles: clamp(toInteger(phase.plannedCycles), 0, 200),
+        duration: toText(phase.duration, 160),
+        schedule: toText(phase.schedule, 200),
+        maintenance: phase.maintenance === true,
+        transitionCondition: toText(phase.transitionCondition, 400),
+        activatedOn: toDate(phase.activatedOn),
+      },
+    });
+
+    const agents = list(phase.agents)
+      .map(record)
+      .map((agent, agentPosition) => ({
+        therapyPlanId,
+        phaseId: created.id,
+        name: toText(agent.genericName, 120) || "",
+        drugClass: toText(agent.drugClass, 120),
+        therapyClass: toText(agent.therapyClass, 120),
+        corscTherapyClass: THERAPY_IDS.has(String(agent.corscTherapyClass))
+          ? String(agent.corscTherapyClass)
+          : null,
+        position: agentPosition,
+      }))
+      .filter((agent) => agent.name.length > 0);
+
+    if (agents.length) await tx.therapyAgent.createMany({ data: agents });
+
+    position += 1;
+  }
 }
 
 /* ------------------------------------------------------ anthracycline doses */

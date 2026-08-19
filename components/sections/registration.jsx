@@ -12,6 +12,7 @@ import { useMemo } from "react";
 import { Activity, AlertTriangle, Check, ClipboardList, ShieldAlert, Syringe, Users } from "lucide-react";
 
 import { DiagnosisStageSelector } from "@/components/diagnosis-stage-selector";
+import { RegimenSelector } from "@/components/regimen-selector";
 import {
   Callout,
   Checkbox,
@@ -30,6 +31,7 @@ import {
 import { CYCLE_FREQUENCIES, THERAPY_CLASSES, riskStyle } from "@/lib/clinical-data";
 import { TROPONIN_ASSAYS } from "@/lib/cardiac-measurements";
 import { TIERS, assessRisk, factorsByTier, therapyList } from "@/lib/hfa-icos";
+import { therapyClassSources } from "@/lib/treatment-course";
 import { num } from "@/lib/vitals";
 
 /**
@@ -61,6 +63,12 @@ export function RegistrationFields({ value, onChange, showRiskPreview = true }) 
     set({ [group]: { ...(value[group] || {}), [id]: !(value[group] || {})[id] } });
 
   const selectedTherapies = therapyList(value.therapy);
+  /* Which classes the regimen accounts for, so the clinician can tell what the
+     record would still hold if the regimen changed. */
+  const therapySources = useMemo(
+    () => therapyClassSources(value.treatmentCourse, selectedTherapies),
+    [value.treatmentCourse, selectedTherapies]
+  );
   function toggleTherapy(id) {
     const next = selectedTherapies.includes(id)
       ? selectedTherapies.filter((therapy) => therapy !== id)
@@ -112,14 +120,10 @@ export function RegistrationFields({ value, onChange, showRiskPreview = true }) 
         />
       </Panel>
 
-      <Panel title="Planned treatment" subtitle="Course details drive the surveillance schedule">
+      <RegimenSelector value={value} onChange={set} />
+
+      <Panel title="Course schedule" subtitle="Cycle count and cumulative dose drive the surveillance timeline">
         <Stack>
-          <TextField
-            label="Chemotherapy regimen"
-            value={value.regimen}
-            onChange={(v) => set({ regimen: v })}
-            placeholder="e.g. AC-T with trastuzumab"
-          />
           <Field label="Number of planned cycles" hint="Tap a cycle or use the stepper. This sets the treatment timeline.">
             <CyclePills
               value={value.plannedCycles}
@@ -190,7 +194,12 @@ export function RegistrationFields({ value, onChange, showRiskPreview = true }) 
                   {active && <Check size={13} className="text-white" strokeWidth={3} aria-hidden="true" />}
                 </span>
                 <span className="min-w-0">
-                  <span className="block text-[14px] font-semibold text-slate-900">{therapy.name}</span>
+                  <span className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="text-[14px] font-semibold text-slate-900">{therapy.name}</span>
+                    {therapySources[therapy.id] === "regimen" && (
+                      <span className="text-[11px] font-medium text-teal-700">from the recorded regimen</span>
+                    )}
+                  </span>
                   <span className="mt-0.5 block text-[12.5px] text-slate-500">{therapy.examples}</span>
                   <span className="mt-1 block text-[12.5px] text-teal-700">{therapy.note}</span>
                 </span>
