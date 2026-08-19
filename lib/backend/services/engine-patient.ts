@@ -55,6 +55,10 @@ export const enginePatientInclude = {
       classes: { orderBy: { position: "asc" } },
       agents: true,
       cycles: { orderBy: { cycleNumber: "asc" } },
+      phases: {
+        orderBy: { position: "asc" },
+        include: { agents: { orderBy: { position: "asc" } } },
+      },
     },
   },
   medications: { orderBy: { createdAt: "asc" } },
@@ -160,6 +164,67 @@ export function describeDose(medication: {
 
   if (medication.frequencyNote) parts.push(medication.frequencyNote);
   return parts.join(" ").trim();
+}
+
+/* ------------------------------------------------------- treatment course */
+
+/**
+ * Rebuilds the structured treatment course from the stored phases.
+ *
+ * Returns null when the plan has no phases, which is the correct shape for a
+ * free-text regimen: the client treats null as "unstructured" and derives no
+ * therapy classes from it. Reconstructing phases from `regimen` text here
+ * would reintroduce exactly the parsing that lib/treatment-course.js refuses
+ * to do, at the one layer where nobody would think to look for it.
+ */
+function toTreatmentCourse(plan: PatientWithClinicalData["therapyPlans"][number] | null) {
+  if (!plan) return null;
+
+  // Plans reaching here from a partial projection carry no phases at all,
+  // which reads the same as a course that has none.
+  const phases = plan.phases ?? [];
+
+  const entryMethod = plan.entryMethod || (phases.length > 0 ? "builder" : "freeText");
+  if (entryMethod === "freeText" || phases.length === 0) {
+    if (!plan.regimen && !plan.regimenFamily) return null;
+    return {
+      entryMethod: "freeText",
+      regimenId: plan.regimenLibraryId || null,
+      regimenFamily: plan.regimenFamily || null,
+      protocolVariant: null,
+      freeTextDescription: plan.regimen || "",
+      phases: [],
+      activePhaseId: null,
+      libraryVersion: null,
+    };
+  }
+
+  return {
+    entryMethod,
+    regimenId: plan.regimenLibraryId || null,
+    regimenFamily: plan.regimenFamily || null,
+    protocolVariant: null,
+    freeTextDescription: plan.regimen || "",
+    phases: phases.map((phase) => ({
+      id: phase.key,
+      name: phase.name,
+      sequence: phase.position + 1,
+      agents: phase.agents.map((agent) => ({
+        genericName: agent.name,
+        drugClass: agent.drugClass,
+        therapyClass: agent.therapyClass,
+        corscTherapyClass: agent.corscTherapyClass,
+        role: null,
+      })),
+      plannedCycles: phase.plannedCycles,
+      duration: phase.duration,
+      schedule: phase.schedule,
+      maintenance: phase.maintenance,
+      transitionCondition: phase.transitionCondition,
+    })),
+    activePhaseId: plan.activePhaseKey || phases[0]?.key || null,
+    libraryVersion: null,
+  };
 }
 
 /* ------------------------------------------------------------- projection */
@@ -344,6 +409,7 @@ export function toEnginePatientRecord(patient: PatientWithClinicalData) {
     stage: primaryDiagnosis?.stage || "",
 
     regimen: leadPlan?.regimen || "",
+    treatmentCourse: toTreatmentCourse(leadPlan),
     therapy,
     plannedCycles: numeric(leadPlan?.plannedCycles),
     cycleFrequency: leadPlan?.cycleFrequency || "",

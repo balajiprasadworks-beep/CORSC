@@ -429,7 +429,27 @@ model TherapyPlan {
   diagnosisId String? @map("diagnosis_id") @db.Uuid
 
   /// Free-text regimen name as the service writes it, e.g. "AC-T".
+  ///
+  /// Retained whichever way the course was entered. For a free-text regimen it
+  /// is the whole record of the treatment, stored exactly as the clinician
+  /// typed it and never parsed — see lib/treatment-course.js.
   regimen String?
+
+  /// How the course was recorded: "preset", "builder" or "freeText".
+  ///
+  /// Stored because it decides what the rest of this record means. A course
+  /// entered as free text has no phases, and that absence is a fact about the
+  /// entry path rather than missing data someone forgot to fill in.
+  entryMethod String? @map("entry_method")
+
+  /// The library regimen a preset was taken from, and its canonical name.
+  /// Kept so the record still says which published regimen was selected after
+  /// the clinician has edited the phases away from it.
+  regimenLibraryId String? @map("regimen_library_id")
+  regimenFamily    String? @map("regimen_family")
+
+  /// The phase the patient is currently on, by `TherapyPhase.key`.
+  activePhaseKey String? @map("active_phase_key")
 
   plannedCycles  Int?      @map("planned_cycles")
   cycleFrequency String?   @map("cycle_frequency")
@@ -454,9 +474,51 @@ model TherapyPlan {
   classes TherapyClassAssignment[]
   agents  TherapyAgent[]
   cycles  TherapyCycle[]
+  phases  TherapyPhase[]
 
   @@index([patientId, active])
   @@map("therapy_plans")
+}
+
+/// One ordered phase of a treatment course.
+///
+/// A cancer course is a sequence, not a single regimen: AC for four cycles,
+/// then a taxane with HER2 blockade, then HER2 blockade alone to a year. Each
+/// step carries its own surveillance, so each is a row and the order is
+/// explicit rather than inferred from a creation timestamp.
+///
+/// Phases exist only for a structured course. A free-text regimen has none,
+/// deliberately — CORSC does not parse a regimen string into phases, because
+/// getting it wrong decides whether a patient is scheduled an echocardiogram.
+model TherapyPhase {
+  id            String @id @default(uuid()) @db.Uuid
+  therapyPlanId String @map("therapy_plan_id") @db.Uuid
+
+  /// Stable identifier from the course as the client holds it, so a phase
+  /// keeps its identity across saves and `activePhaseKey` still resolves.
+  key      String
+  name     String
+  position Int    @default(0)
+
+  plannedCycles Int?    @map("planned_cycles")
+  /// Free text for courses measured in time rather than cycles, e.g.
+  /// "to complete 1 year".
+  duration      String?
+  schedule      String?
+
+  maintenance         Boolean @default(false)
+  /// What moves the patient on from this phase, where the service records it.
+  transitionCondition String? @map("transition_condition")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  therapyPlan TherapyPlan    @relation(fields: [therapyPlanId], references: [id], onDelete: Cascade)
+  agents      TherapyAgent[]
+
+  @@unique([therapyPlanId, key])
+  @@index([therapyPlanId, position])
+  @@map("therapy_phases")
 }
 
 /// One cardiotoxicity-relevant therapy class on a plan. The class identifiers
@@ -480,6 +542,10 @@ model TherapyClassAssignment {
 model TherapyAgent {
   id            String   @id @default(uuid()) @db.Uuid
   therapyPlanId String   @map("therapy_plan_id") @db.Uuid
+  /// The phase this agent is given in, for a structured course. Null for an
+  /// agent recorded against the plan as a whole, which is how agents were
+  /// stored before courses had phases.
+  phaseId       String?  @map("phase_id") @db.Uuid
   /// Anthracycline agents use the identifiers in lib/anthracycline.js so the
   /// dose ledger can convert them. Other agents are recorded by name.
   agentId       String?  @map("agent_id")
@@ -488,9 +554,26 @@ model TherapyAgent {
   doseUnit      DoseUnit? @map("dose_unit")
   route         MedicationRoute?
 
-  therapyPlan TherapyPlan @relation(fields: [therapyPlanId], references: [id], onDelete: Cascade)
+  /// The drug class and the regimen library's own therapy vocabulary, stored
+  /// verbatim. They are NOT the CORSC therapy class: mapping one onto the
+  /// other is a clinical rule and lives in lib/treatment-course.js, so that
+  /// changing the mapping is a reviewed code change rather than a data
+  /// migration, and so a stored row never asserts a pathway CORSC no longer
+  /// believes in.
+  drugClass    String? @map("drug_class")
+  therapyClass String? @map("therapy_class")
+  /// A CORSC therapy class the clinician asserted by hand for an agent the
+  /// library cannot classify. Their judgement, recorded as such — never a
+  /// derived value written back.
+  corscTherapyClass String? @map("corsc_therapy_class")
+
+  position Int @default(0)
+
+  therapyPlan TherapyPlan   @relation(fields: [therapyPlanId], references: [id], onDelete: Cascade)
+  phase       TherapyPhase? @relation(fields: [phaseId], references: [id], onDelete: Cascade)
 
   @@index([therapyPlanId])
+  @@index([phaseId, position])
   @@map("therapy_agents")
 }
 
