@@ -16,11 +16,11 @@
 
 import { ArrowRight, CalendarClock, ShieldAlert } from "lucide-react";
 
-import { mono, serif } from "@/components/kit";
+import { mono, serif, StatusChip } from "@/components/kit";
 import { riskStyle } from "@/lib/clinical-data";
 
 export function RiskSurveillanceSummary({ picture, onJump }) {
-  const { currentRisk, riskEscalation, baselineRisk, activeTreatmentPhase, treatmentPhasePosition, tasks, tasksDone, nextFollowUp, outstanding } = picture;
+  const { currentRisk, riskEscalation, baselineRisk, activeTreatmentPhase, treatmentPhasePosition, tasks, tasksDone, nextFollowUp, outstanding, completeness } = picture;
   const styles = riskStyle(currentRisk);
   const outstandingCount = outstanding.filter((item) => item.status === "missing" || item.status === "overdue").length;
   const dueTasks = tasks.filter((task) => !task.completed);
@@ -35,9 +35,16 @@ export function RiskSurveillanceSummary({ picture, onJump }) {
       aria-label="Cardiac risk and surveillance"
       className={`rounded-2xl border p-4 ${styles.bg} ${styles.border}`}
     >
-      <div className="mb-3 flex items-center gap-2">
-        <ShieldAlert size={16} className={styles.text} aria-hidden="true" />
-        <span className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">Cardiac risk &amp; surveillance</span>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <ShieldAlert size={16} className={styles.text} aria-hidden="true" />
+          <span className="text-[11px] font-semibold uppercase tracking-widest text-slate-500">Cardiac risk &amp; surveillance</span>
+        </div>
+        {completeness && (
+          <StatusChip tone={completeness.bandTone}>
+            {completeness.visitTypeId ? "Visit" : "Baseline"} {completeness.percent}% — {completeness.bandLabel}
+          </StatusChip>
+        )}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">

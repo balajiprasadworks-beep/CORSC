@@ -640,7 +640,9 @@ export function CompletenessBar({ completeness }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="text-[11px] uppercase tracking-widest text-slate-500">Baseline completeness</span>
+        <span className="text-[11px] uppercase tracking-widest text-slate-500">
+          {completeness.visitTypeId ? "Visit completeness" : "Baseline completeness"}
+        </span>
         <span className="flex items-center gap-2">
           <span className="text-[17px] font-bold text-slate-900" style={mono}>{completeness.percent}%</span>
           <StatusChip tone={completeness.bandTone}>{completeness.bandLabel}</StatusChip>
