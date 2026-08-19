@@ -13,6 +13,7 @@ import { ArrowRight, CheckCircle2, Save, Sparkles, X } from "lucide-react";
 
 import { AiAssistant, AssistantBanner } from "@/components/ai-assistant";
 import { ActionBar } from "@/components/fitness-banner";
+import { ClinicalAlerts } from "@/components/clinical-alerts";
 import { RiskSurveillanceSummary } from "@/components/risk-surveillance-summary";
 import { ReviewModeToggle } from "@/components/review-mode-toggle";
 import { StickyPatientHeader } from "@/components/sticky-header";
@@ -321,6 +322,24 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
     ];
   }, [established, reviewMode, patient, picture.nextFollowUp]);
 
+  /* What Changes Only is silently not re-asking for — named explicitly so
+     "nothing here needs re-asking" reads as a checked fact, not a guess. */
+  const carriedForward = useMemo(() => {
+    if (!established || reviewMode !== "quick") return null;
+    const items = [];
+    if (patient.diagnosis) items.push(`${patient.diagnosis}${patient.stage ? `, stage ${patient.stage}` : ""}`);
+    const hasHistory = Object.values(patient.history || {}).some(
+      (group) => Object.values(group?.checks || {}).some(Boolean) || Object.values(group?.fields || {}).some((v) => String(v || "").trim())
+    );
+    if (hasHistory) items.push("Cardiovascular history and risk factors");
+    if ((patient.medications || []).length > 0) {
+      items.push(`${patient.medications.length} current medication${patient.medications.length === 1 ? "" : "s"}`);
+    }
+    if (isFilled(patient.baselineLVEF)) items.push(`Baseline LVEF ${patient.baselineLVEF}%`);
+    if (isFilled(patient.baselineHeight)) items.push(`Baseline height ${patient.baselineHeight} cm`);
+    return items;
+  }, [established, reviewMode, patient]);
+
   /* Switching review mode changes which sections exist on the page, so the
      previously-open section id may no longer be one of them. Re-anchor on the
      first visible section of the mode being switched to, rather than leaving
@@ -415,6 +434,47 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
     setOpenSections(new Set(["first-review"]));
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
+
+  /* Keyboard shortcuts: j/k or the arrow keys move between sections without
+     reaching for the mouse, Cmd/Ctrl+Enter files the encounter. A ref holds
+     the latest closures so the listener is attached once at mount rather than
+     re-attached on every keystroke elsewhere on the page, while still always
+     acting on current state rather than whatever it was when the tab opened. */
+  const keyActionsRef = useRef();
+  useEffect(() => {
+    keyActionsRef.current = { activeSection, sections, completed, completeEncounter, advance, jumpTo };
+  });
+
+  useEffect(() => {
+    function handleKeyDown(event) {
+      const { activeSection: current, sections: currentSections, completed: isCompleted, completeEncounter: complete, advance: goNext, jumpTo: goTo } =
+        keyActionsRef.current;
+      const target = event.target;
+      const isTyping = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        if (isCompleted) return;
+        event.preventDefault();
+        complete();
+        return;
+      }
+      if (isTyping) return;
+
+      if (event.key === "j" || event.key === "ArrowDown") {
+        event.preventDefault();
+        goNext(current);
+      } else if (event.key === "k" || event.key === "ArrowUp") {
+        const index = currentSections.findIndex((section) => section.id === current);
+        const previous = currentSections[index - 1];
+        if (previous) {
+          event.preventDefault();
+          goTo(previous.id);
+        }
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const renderSection = (section) => {
     switch (section.id) {
@@ -516,7 +576,9 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
 
           <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start lg:gap-5">
             <div className="space-y-3">
-              <ReviewModeToggle mode={reviewMode} onChange={changeReviewMode} snapshot={snapshot} />
+              <ReviewModeToggle mode={reviewMode} onChange={changeReviewMode} snapshot={snapshot} carriedForward={carriedForward} />
+
+              <ClinicalAlerts alerts={picture.alerts} />
 
               <ActionBar
                 fitness={picture.fitness}
@@ -531,6 +593,13 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
               <div className="lg:hidden">
                 <AssistantBanner summary={summary} onOpen={() => setAssistantOpen(true)} />
               </div>
+
+              <p className="hidden text-[11px] text-slate-400 lg:block">
+                <kbd className="rounded border border-slate-200 bg-slate-50 px-1 py-0.5 font-mono">j</kbd>/
+                <kbd className="rounded border border-slate-200 bg-slate-50 px-1 py-0.5 font-mono">k</kbd> to move between sections ·{" "}
+                <kbd className="rounded border border-slate-200 bg-slate-50 px-1 py-0.5 font-mono">⌘/Ctrl</kbd>+
+                <kbd className="rounded border border-slate-200 bg-slate-50 px-1 py-0.5 font-mono">Enter</kbd> to file the encounter
+              </p>
 
               {sections.map((section, index) => {
                 const isLast = index === sections.length - 1;
