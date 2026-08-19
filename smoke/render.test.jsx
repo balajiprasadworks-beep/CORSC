@@ -59,10 +59,13 @@ function render(node) {
 }
 
 describe("component smoke render", () => {
-  it("renders the fitness banner with a hold verdict", () => {
-    const html = render(<FitnessBanner fitness={picture.fitness} onJump={noop} />);
-    expect(html).toContain("Fitness to proceed");
+  it("renders the action bar with a hold verdict", () => {
+    const html = render(<FitnessBanner fitness={picture.fitness} nextFollowUp={picture.nextFollowUp} onJump={noop} />);
+    expect(html).toContain("Action bar");
     expect(html).toContain("Hold");
+    expect(html).toContain("What happened");
+    expect(html).toContain("What it means");
+    expect(html).toContain("What to do next");
   });
 
   it("renders the risk section with the graded verdict", () => {

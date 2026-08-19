@@ -71,6 +71,11 @@ export async function createOverride(
       reason: input.reason,
       clinicianId: options.actor.clinician.id,
     },
+    // Matches listOverrides' shape, so the client that just created this
+    // override can render "by whom" immediately rather than refetching.
+    include: {
+      clinician: { select: { id: true, displayName: true, email: true } },
+    },
   });
 
   await recordAudit(prisma, {

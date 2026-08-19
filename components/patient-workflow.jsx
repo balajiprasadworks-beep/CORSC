@@ -12,7 +12,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, CheckCircle2, Save, Sparkles, X } from "lucide-react";
 
 import { AiAssistant, AssistantBanner } from "@/components/ai-assistant";
-import { FitnessBanner } from "@/components/fitness-banner";
+import { ActionBar } from "@/components/fitness-banner";
+import { RiskSurveillanceSummary } from "@/components/risk-surveillance-summary";
 import { StickyPatientHeader } from "@/components/sticky-header";
 import { PatientTimeline, TIMELINE_ICON } from "@/components/patient-timeline";
 import { Callout, StatusChip, WorkflowSection } from "@/components/kit";
@@ -265,6 +266,18 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
 
   const picture = useMemo(() => buildClinicalPicture(patient, encounter), [patient, encounter]);
   const summary = useMemo(() => buildSummary(picture), [picture]);
+
+  /** Merges a newly recorded override into local state immediately, rather
+      than waiting for the next autosave round trip to reflect it. */
+  const handleOverrideRecorded = useCallback(
+    (raw) => {
+      setPatient((current) => ({
+        ...current,
+        overrides: [{ ...raw, at: raw.createdAt, active: raw.withdrawnAt === null }, ...(current.overrides || [])],
+      }));
+    },
+    [setPatient]
+  );
   /* Only the sections this visit type calls for. A twelve-month survivorship
      review has no treatment tolerance and no current cycle, and a baseline
      assessment has no interval to report on — showing those sections invites
@@ -456,7 +469,15 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
 
           <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start lg:gap-5">
             <div className="space-y-3">
-              <FitnessBanner fitness={picture.fitness} onJump={jumpTo} />
+              <ActionBar
+                fitness={picture.fitness}
+                nextFollowUp={picture.nextFollowUp}
+                patientId={patient.id}
+                onOverride={handleOverrideRecorded}
+                onJump={jumpTo}
+              />
+
+              <RiskSurveillanceSummary picture={picture} onJump={jumpTo} />
 
               <div className="lg:hidden">
                 <AssistantBanner summary={summary} onOpen={() => setAssistantOpen(true)} />
@@ -494,6 +515,17 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
                   </div>
                 );
               })}
+
+              {/* Repeated immediately before completion — a clinician about to
+                  file the encounter should see the current verdict one more
+                  time, not have to scroll back to the top to check it. */}
+              <ActionBar
+                fitness={picture.fitness}
+                nextFollowUp={picture.nextFollowUp}
+                patientId={patient.id}
+                onOverride={handleOverrideRecorded}
+                onJump={jumpTo}
+              />
 
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
                 <div className="mb-3 flex flex-wrap items-center gap-2">
