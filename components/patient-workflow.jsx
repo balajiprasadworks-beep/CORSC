@@ -14,6 +14,7 @@ import { ArrowRight, CheckCircle2, Save, Sparkles, X } from "lucide-react";
 import { AiAssistant, AssistantBanner } from "@/components/ai-assistant";
 import { ActionBar } from "@/components/fitness-banner";
 import { RiskSurveillanceSummary } from "@/components/risk-surveillance-summary";
+import { ReviewModeToggle } from "@/components/review-mode-toggle";
 import { StickyPatientHeader } from "@/components/sticky-header";
 import { PatientTimeline, TIMELINE_ICON } from "@/components/patient-timeline";
 import { Callout, StatusChip, WorkflowSection } from "@/components/kit";
@@ -33,8 +34,17 @@ import { FollowUpSection, FOLLOW_UP_ICON } from "@/components/sections/follow-up
 import { EXAM_SYSTEMS, HISTORY_GROUPS, INVESTIGATIONS } from "@/lib/clinical-data";
 import { buildClinicalPicture } from "@/lib/clinical-picture";
 import { buildSummary } from "@/lib/ai-summary";
-import { createEncounter, currentCycle, isFilled, latestLVEF, todayISO } from "@/lib/patient-model";
+import {
+  createEncounter,
+  currentCycle,
+  isEstablishedPatient,
+  isFilled,
+  latestLVEF,
+  latestNumericInvestigation,
+  todayISO,
+} from "@/lib/patient-model";
 import { sectionsForVisit } from "@/lib/visit-types";
+import { quickSectionIds } from "@/lib/workflow-mode";
 
 /* --------------------------------------------------------- section model */
 
@@ -252,6 +262,9 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
   const [activeSection, setActiveSection] = useState("first-review");
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [completed, setCompleted] = useState(false);
+  /* Changes Only is the default for every visit type — spec #16's "recommended"
+     choice — with Full Review always one click away and never removed. */
+  const [reviewMode, setReviewMode] = useState("quick");
   const sectionRefs = useRef({});
 
   const setEncounter = useCallback(
@@ -282,10 +295,42 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
      review has no treatment tolerance and no current cycle, and a baseline
      assessment has no interval to report on — showing those sections invites
      documentation that means nothing and buries the sections that matter. */
-  const sections = useMemo(
+  const visitTypeSections = useMemo(
     () => sectionsForVisit(encounter, sectionDefinitions({ patient, encounter, picture })),
     [patient, encounter, picture]
   );
+
+  /* Changes Only narrows further, on top of the visit-type filter above —
+     never in place of it, so an unscheduled review still only ever shows
+     sections that visit type actually has. */
+  const currentQuickIds = quickSectionIds(picture.workflowMode.mode);
+  const sections =
+    reviewMode === "quick" ? visitTypeSections.filter((section) => currentQuickIds.includes(section.id)) : visitTypeSections;
+
+  const established = isEstablishedPatient(patient);
+  const snapshot = useMemo(() => {
+    if (!established || reviewMode !== "quick") return null;
+    const previousLVEF = latestNumericInvestigation(patient, null, "lvef");
+    const previousGLS = latestNumericInvestigation(patient, null, "gls");
+    return [
+      { label: "Previous status", value: patient.clinicalStatus || "—" },
+      { label: "Previous LVEF", value: previousLVEF !== null ? `${previousLVEF}%` : "—" },
+      { label: "Previous GLS", value: previousGLS !== null ? `${previousGLS}%` : "—" },
+      { label: "Last surveillance", value: picture.nextFollowUp?.date ? `next due ${picture.nextFollowUp.date}` : "—" },
+    ];
+  }, [established, reviewMode, patient, picture.nextFollowUp]);
+
+  /* Switching review mode changes which sections exist on the page, so the
+     previously-open section id may no longer be one of them. Re-anchor on the
+     first visible section of the mode being switched to, rather than leaving
+     nothing open — computed here, in the user-triggered handler, rather than
+     an effect reacting to the state change afterwards. */
+  function changeReviewMode(nextMode) {
+    setReviewMode(nextMode);
+    const nextSectionIds = nextMode === "quick" ? quickSectionIds(picture.workflowMode.mode) : null;
+    const nextVisible = nextSectionIds ? visitTypeSections.filter((section) => nextSectionIds.includes(section.id)) : visitTypeSections;
+    if (nextVisible.length > 0) setOpenSections(new Set([nextVisible[0].id]));
+  }
 
   /* Track which section is in view so the header nav reflects position. */
   useEffect(() => {
@@ -470,6 +515,8 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
 
           <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start lg:gap-5">
             <div className="space-y-3">
+              <ReviewModeToggle mode={reviewMode} onChange={changeReviewMode} snapshot={snapshot} />
+
               <ActionBar
                 fitness={picture.fitness}
                 nextFollowUp={picture.nextFollowUp}
