@@ -14,7 +14,7 @@ import { CheckCircle2, ListChecks } from "lucide-react";
 
 import { SegmentedControl } from "@/components/kit";
 
-export function ReviewModeToggle({ mode, onChange, snapshot }) {
+export function ReviewModeToggle({ mode, onChange, snapshot, carriedForward }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-3.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -45,11 +45,22 @@ export function ReviewModeToggle({ mode, onChange, snapshot }) {
       )}
 
       {mode === "quick" && (
-        <p className="mt-2.5 flex items-start gap-1.5 text-[12px] leading-relaxed text-slate-500">
-          <CheckCircle2 size={13} className="mt-0.5 shrink-0 text-teal-600" aria-hidden="true" />
-          Stable information — diagnosis, stage, history, baseline values, prior medications — is carried forward from
-          the record automatically. Only what changed needs entering below.
-        </p>
+        <div className="mt-2.5">
+          <p className="flex items-start gap-1.5 text-[12px] leading-relaxed text-slate-500">
+            <CheckCircle2 size={13} className="mt-0.5 shrink-0 text-teal-600" aria-hidden="true" />
+            Stable information — diagnosis, stage, history, baseline values, prior medications — is carried forward from
+            the record automatically. Only what changed needs entering below.
+          </p>
+          {carriedForward && carriedForward.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5 pl-5">
+              {carriedForward.map((fact) => (
+                <span key={fact} className="rounded-full bg-slate-50 px-2.5 py-1 text-[11.5px] font-medium text-slate-600 ring-1 ring-slate-200">
+                  {fact}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
