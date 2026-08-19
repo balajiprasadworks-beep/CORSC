@@ -235,13 +235,20 @@ export function InvestigationsSection({ picture, encounter, setEncounter }) {
             {dueItems.map((item) => {
               const definition = INVESTIGATIONS.find((d) => d.id === item.id);
               if (!definition) return null;
+              const value = encounter.inv?.[item.id] || { result: "", interp: "", date: "", comment: "" };
+              const seededFrom =
+                item.id === "lvef" ? patient?.baselineLVEF : item.id === "gls" ? patient?.baselineGLS : null;
+              const reason =
+                encounter.type === "Baseline" && seededFrom && String(seededFrom) === String(value.result)
+                  ? `${item.reason} Pre-filled from the baseline value recorded at registration — correct it here if the echo reading differs.`
+                  : item.reason;
               return (
                 <InvestigationRow
                   key={item.id}
                   definition={definition}
-                  reason={item.reason}
+                  reason={reason}
                   patient={patient}
-                  value={encounter.inv?.[item.id] || { result: "", interp: "", date: "", comment: "" }}
+                  value={value}
                   onChange={(patch) => setInv(item.id, patch)}
                 />
               );

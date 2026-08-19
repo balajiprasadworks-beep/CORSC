@@ -8,6 +8,7 @@
    alone does not tell the clinician what to do about it.
    ========================================================================= */
 
+import { useState } from "react";
 import { HeartPulse } from "lucide-react";
 
 import { Callout, Grid, MetricTile, Panel, Stack, TextField } from "@/components/kit";
@@ -15,8 +16,9 @@ import { deriveVitals } from "@/lib/vitals";
 
 export function VitalsSection({ patient, encounter, setEncounter }) {
   const vitals = encounter.vitals || {};
-  const derived = deriveVitals(vitals, patient.baselineWeight);
+  const derived = deriveVitals(vitals, patient.baselineWeight, patient.baselineHeight);
   const set = (patch) => setEncounter((current) => ({ ...current, vitals: { ...current.vitals, ...patch } }));
+  const [editingHeight, setEditingHeight] = useState(Boolean(vitals.height));
 
   const reference = derived.referenceWeight;
   const bpValue = vitals.sbp && vitals.dbp ? `${vitals.sbp}/${vitals.dbp}` : null;
@@ -25,7 +27,43 @@ export function VitalsSection({ patient, encounter, setEncounter }) {
     <Stack gap="gap-4">
       <Panel title="Measurements">
         <Grid cols="sm:grid-cols-2 lg:grid-cols-4">
-          <TextField label="Height" value={vitals.height} onChange={(v) => set({ height: v })} type="number" unit="cm" placeholder="170" />
+          {editingHeight ? (
+            <TextField
+              label="Height"
+              value={vitals.height}
+              onChange={(v) => set({ height: v })}
+              type="number"
+              unit="cm"
+              placeholder={patient.baselineHeight ? String(patient.baselineHeight) : "170"}
+              hint={
+                patient.baselineHeight
+                  ? `Overrides the registration baseline of ${patient.baselineHeight} cm for this encounter only.`
+                  : "No baseline height on record — record it in registration to carry it forward."
+              }
+            />
+          ) : (
+            <div className="rounded-xl border border-slate-200 bg-white p-3">
+              <div className="text-[10px] font-medium uppercase tracking-widest text-slate-400">Height</div>
+              <div className="mt-0.5 flex items-baseline gap-1">
+                <span className="text-[20px] font-bold text-slate-900" style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {patient.baselineHeight || "—"}
+                </span>
+                {patient.baselineHeight && <span className="text-[12px] text-slate-400">cm</span>}
+              </div>
+              <div className="mt-0.5 flex items-center justify-between gap-1">
+                <span className="text-[11.5px] leading-snug text-slate-500">
+                  {patient.baselineHeight ? "From registration baseline" : "Not recorded at registration"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setEditingHeight(true)}
+                  className="shrink-0 text-[11px] font-medium text-teal-700 hover:underline"
+                >
+                  Correct
+                </button>
+              </div>
+            </div>
+          )}
           <TextField label="Weight" value={vitals.weight} onChange={(v) => set({ weight: v })} type="number" unit="kg" placeholder="72.4" />
           <TextField label="Systolic BP" value={vitals.sbp} onChange={(v) => set({ sbp: v })} type="number" unit="mmHg" placeholder="128" />
           <TextField label="Diastolic BP" value={vitals.dbp} onChange={(v) => set({ dbp: v })} type="number" unit="mmHg" placeholder="82" />

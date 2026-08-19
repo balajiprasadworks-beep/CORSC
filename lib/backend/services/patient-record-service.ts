@@ -179,6 +179,7 @@ const AUDITED_PATIENT_FIELDS = [
   "troponinAssay",
   "troponinURL",
   "baselineWeight",
+  "baselineHeight",
 ] as const;
 
 /**

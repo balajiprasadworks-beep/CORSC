@@ -8,7 +8,7 @@
    not selected.
    ========================================================================= */
 
-import { ClipboardList, AlertTriangle } from "lucide-react";
+import { CheckCircle2, ClipboardList, AlertTriangle } from "lucide-react";
 
 import {
   Callout,
@@ -28,6 +28,7 @@ const SEVERITY_TONE = { Mild: "ok", Moderate: "warning", Severe: "danger" };
 
 export function SymptomsSection({ encounter, setEncounter }) {
   const selected = encounter.symptoms || [];
+  const negativeScreen = selected.length === 0 && encounter.symptomsScreenComplete === true;
 
   function toggle(symptom) {
     setEncounter((current) => {
@@ -35,8 +36,18 @@ export function SymptomsSection({ encounter, setEncounter }) {
       const symptoms = existing.includes(symptom)
         ? existing.filter((s) => s !== symptom)
         : [...existing, symptom];
-      return { ...current, symptoms };
+      // Selecting or clearing a symptom is itself a screen having happened.
+      return { ...current, symptoms, symptomsScreenComplete: true };
     });
+  }
+
+  function markNoNewSymptoms() {
+    setEncounter((current) => ({
+      ...current,
+      symptoms: [],
+      symptomDetail: {},
+      symptomsScreenComplete: !negativeScreen,
+    }));
   }
 
   function setDetail(symptom, patch) {
@@ -54,7 +65,19 @@ export function SymptomsSection({ encounter, setEncounter }) {
   return (
     <Stack gap="gap-4">
       <Panel title="Symptom screen" subtitle="Tap to select. Detail opens underneath each selected symptom.">
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={markNoNewSymptoms}
+            aria-pressed={negativeScreen}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12.5px] font-semibold transition ${
+              negativeScreen ? "border-teal-600 bg-teal-50 text-teal-700" : "border-slate-300 bg-white text-slate-600 hover:border-teal-300 hover:text-teal-700"
+            }`}
+          >
+            <CheckCircle2 size={13} aria-hidden="true" />
+            No new cardiovascular symptoms
+          </button>
+          <span className="h-4 w-px bg-slate-200" aria-hidden="true" />
           {SYMPTOMS.map((symptom) => (
             <Chip key={symptom} size="sm" active={selected.includes(symptom)} onClick={() => toggle(symptom)}>
               {symptom}
@@ -71,7 +94,11 @@ export function SymptomsSection({ encounter, setEncounter }) {
       )}
 
       {selected.length === 0 ? (
-        <EmptyState>No symptoms selected. Symptom detail fields stay hidden until one is chosen.</EmptyState>
+        <EmptyState>
+          {negativeScreen
+            ? "Screened — no new cardiovascular symptoms reported at this visit."
+            : "No symptoms selected. Symptom detail fields stay hidden until one is chosen."}
+        </EmptyState>
       ) : (
         <Stack gap="gap-2.5">
           {selected.map((symptom) => {

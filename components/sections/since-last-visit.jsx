@@ -12,10 +12,10 @@
    response changes the plan rather than sitting in prose nobody re-reads.
    ========================================================================= */
 
-import { History } from "lucide-react";
+import { CheckCircle2, History } from "lucide-react";
 
 import { Callout, EmptyState, Panel, SourceNote, Stack, StatusChip, TextArea } from "@/components/kit";
-import { SINCE_LAST_VISIT_GROUPS, interpretSinceLastVisit, itemsForGroup } from "@/lib/visit-types";
+import { SINCE_LAST_VISIT_GROUPS, SINCE_LAST_VISIT_ITEMS, interpretSinceLastVisit, itemsForGroup } from "@/lib/visit-types";
 
 const ANSWERS = [
   { id: "yes", label: "Yes", present: true },
@@ -25,6 +25,8 @@ const ANSWERS = [
 export function SinceLastVisitSection({ encounter, setEncounter, picture }) {
   const answers = encounter?.sinceLastVisit || {};
   const interval = picture?.intervalHistory || interpretSinceLastVisit(encounter);
+  const answeredCount = Object.keys(answers).length;
+  const allNegative = answeredCount === SINCE_LAST_VISIT_ITEMS.length && SINCE_LAST_VISIT_ITEMS.every((item) => answers[item.id]?.present === false);
 
   function setAnswer(itemId, present) {
     setEncounter((current) => {
@@ -38,6 +40,19 @@ export function SinceLastVisitSection({ encounter, setEncounter, picture }) {
       else updated[itemId] = next;
       return { ...current, sinceLastVisit: updated };
     });
+  }
+
+  /** One tap for the common case — every interval item negative — with every
+      item still individually visible and changeable below. */
+  function markAllNegative() {
+    setEncounter((current) => ({
+      ...current,
+      sinceLastVisit: Object.fromEntries(SINCE_LAST_VISIT_ITEMS.map((item) => [item.id, { present: false }])),
+    }));
+  }
+
+  function clearAnswers() {
+    setEncounter((current) => ({ ...current, sinceLastVisit: {} }));
   }
 
   function setDetail(itemId, detail) {
@@ -58,6 +73,24 @@ export function SinceLastVisitSection({ encounter, setEncounter, picture }) {
           anything measured at this encounter is abnormal.
         </Callout>
       )}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3">
+        <button
+          type="button"
+          onClick={markAllNegative}
+          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] font-semibold transition ${
+            allNegative ? "border-teal-600 bg-teal-50 text-teal-700" : "border-slate-300 bg-white text-slate-700 hover:border-teal-300 hover:text-teal-700"
+          }`}
+        >
+          <CheckCircle2 size={14} aria-hidden="true" />
+          No interval cardiovascular events
+        </button>
+        {answeredCount > 0 && (
+          <button type="button" onClick={clearAnswers} className="text-[12px] font-medium text-slate-500 hover:text-slate-700 hover:underline">
+            Any exceptions? Clear and answer individually
+          </button>
+        )}
+      </div>
 
       {SINCE_LAST_VISIT_GROUPS.map((group) => (
         <Panel key={group.id} title={group.label} subtitle={group.hint}>

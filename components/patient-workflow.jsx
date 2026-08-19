@@ -41,6 +41,7 @@ import {
   isFilled,
   latestLVEF,
   latestNumericInvestigation,
+  seedBaselineDefaults,
   todayISO,
 } from "@/lib/patient-model";
 import { sectionsForVisit } from "@/lib/visit-types";
@@ -257,7 +258,7 @@ function exportCsv(patient, encounter) {
 /* ------------------------------------------------------------- workflow */
 
 export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
-  const encounter = patient.draftEncounter || createEncounter("Baseline");
+  const encounter = seedBaselineDefaults(patient.draftEncounter || createEncounter("Baseline"), patient);
   const [openSections, setOpenSections] = useState(() => new Set(["first-review"]));
   const [activeSection, setActiveSection] = useState("first-review");
   const [assistantOpen, setAssistantOpen] = useState(false);
@@ -270,7 +271,7 @@ export function PatientWorkflow({ patient, setPatient, onBack, saveState }) {
   const setEncounter = useCallback(
     (updater) => {
       setPatient((current) => {
-        const draft = current.draftEncounter || createEncounter("Baseline");
+        const draft = seedBaselineDefaults(current.draftEncounter || createEncounter("Baseline"), current);
         return { ...current, draftEncounter: typeof updater === "function" ? updater(draft) : { ...draft, ...updater } };
       });
     },
