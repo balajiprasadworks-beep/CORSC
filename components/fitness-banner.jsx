@@ -89,12 +89,12 @@ function OverrideControl({ patientId, algorithmicVerdict, onRecorded }) {
     try {
       const result = await apiFetch(`/api/patients/${patientId}/overrides`, {
         method: "POST",
-        body: JSON.stringify({
+        body: {
           target: "fitness",
           algorithmicValue: algorithmicVerdict,
           clinicianValue: decision,
           reason: reason.trim(),
-        }),
+        },
       });
       onRecorded(result);
       setOpen(false);

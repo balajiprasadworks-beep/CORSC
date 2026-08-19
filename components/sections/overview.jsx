@@ -31,6 +31,7 @@ import {
   riskStyle,
   therapyNames,
 } from "@/lib/clinical-data";
+import { DraftNoteButton } from "@/components/ai-note-tools";
 import { RULES_VERSION, clinicalSource } from "@/lib/clinical-sources";
 import { medClassLabel } from "@/lib/medication-engine";
 import { systemSummaryText } from "@/lib/patient-model";
@@ -314,7 +315,10 @@ export function OverviewSection({ patient, encounter, setEncounter, picture, sum
         </Stack>
       </Panel>
 
-      <Panel title="Consultant notes">
+      <Panel
+        title="Consultant notes"
+        right={<DraftNoteButton patientId={patient.id} context={summary.narrative} onDraft={(draft) => setEncounter((current) => ({ ...current, notes: draft }))} />}
+      >
         <TextArea
           label="Notes for the record"
           rows={4}
@@ -322,6 +326,10 @@ export function OverviewSection({ patient, encounter, setEncounter, picture, sum
           value={encounter.notes || ""}
           onChange={(value) => setEncounter((current) => ({ ...current, notes: value }))}
         />
+        <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+          &ldquo;Draft with AI&rdquo; sends the already-computed clinical summary to the configured AI provider and fills this field with an
+          editable starting point — it replaces nothing without being reviewed here first.
+        </p>
       </Panel>
 
       <div className="flex flex-wrap gap-2">
