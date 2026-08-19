@@ -222,6 +222,7 @@ export function RegistrationFields({ value, onChange, showRiskPreview = true }) 
           <Grid>
             <TextField label="Baseline LVEF" value={value.baselineLVEF} onChange={(v) => set({ baselineLVEF: v })} type="number" unit="%" hint="Without this, no later fall can be identified as new." />
             <TextField label="Baseline GLS" value={value.baselineGLS} onChange={(v) => set({ baselineGLS: v })} type="number" unit="%" hint="Enter as measured, usually negative. A relative fall over 15% is significant." />
+            <TextField label="Baseline height" value={value.baselineHeight} onChange={(v) => set({ baselineHeight: v })} type="number" unit="cm" hint="Carried forward to every visit's BMI and body surface area." />
             <TextField label="Baseline weight" value={value.baselineWeight} onChange={(v) => set({ baselineWeight: v })} type="number" unit="kg" hint="Reference for weight-loss tracking." />
             <TextField label="Baseline QTc" value={value.baselineQTc} onChange={(v) => set({ baselineQTc: v })} type="number" unit="ms" hint="A later rise of 60 ms or more is actionable in itself." />
           </Grid>
