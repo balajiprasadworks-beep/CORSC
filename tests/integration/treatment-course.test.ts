@@ -15,8 +15,8 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { call, muteRequestLog, supabaseStub } from "../helpers/api";
-import { CLINICIAN_A, databaseAvailable, disconnect, makeClinician, resetDatabase } from "../helpers/database";
-import { courseFromPreset, derivedTherapyClasses } from "@/lib/treatment-course";
+import { CLINICIAN_A, databaseAvailable, db, disconnect, makeClinician, resetDatabase } from "../helpers/database";
+import { courseFromPreset, derivedTherapyClasses, setActivePhase } from "@/lib/treatment-course";
 
 vi.mock("@supabase/supabase-js", () => supabaseStub());
 
@@ -54,6 +54,7 @@ suite("treatment course through the database", () => {
       agents: Array<{ genericName: string; therapyClass: string | null; corscTherapyClass: string | null }>;
       plannedCycles: number | null;
       maintenance: boolean;
+      activatedOn: string | null;
     }>;
     activePhaseId: string | null;
   };
@@ -276,6 +277,72 @@ suite("treatment course through the database", () => {
     // The therapy classes are NOT retracted: they were confirmed by the
     // clinician and remain a fact about the patient's planned treatment.
     expect(stored.therapy).toEqual(["anthracycline", "her2"]);
+  });
+
+  /* -------------------------------------------------------- transitions */
+
+  it("recalculates the surveillance schedule and records why when the active phase changes", async () => {
+    let course = courseFromPreset("breast_ac_th")!;
+    course = setActivePhase(course, course.phases[0].id, { on: "2026-01-05" });
+
+    const created = await register({
+      name: "Jane Doe",
+      age: 48,
+      gender: "Female",
+      baselineLVEF: 58,
+      treatmentCourse: course,
+      therapy: ["anthracycline", "her2"],
+      risk: { category: "High" },
+    });
+    const patientId = (created.patient as { id: string }).id;
+    const beforeMove = await read(patientId);
+
+    const moved = setActivePhase(beforeMove.treatmentCourse!, beforeMove.treatmentCourse!.phases[1].id, {
+      on: "2026-03-16",
+    });
+
+    const updated = await call<{ patient: Doc; updatedAt: string }>(recordRoute.PUT, {
+      as: CLINICIAN_A,
+      method: "PUT",
+      params: { patientId },
+      body: { ...(beforeMove as Doc), treatmentCourse: moved, expectedUpdatedAt: created.updatedAt },
+    });
+    expect(updated.status).toBe(200);
+
+    const stored = await read(patientId);
+    expect(stored.treatmentCourse?.activePhaseId).toBe(course.phases[1].id);
+    expect(stored.treatmentCourse?.phases[1].activatedOn).toBe("2026-03-16");
+
+    // The audit trail names the specification's own example transition.
+    const audit = await db().auditEvent.findFirst({
+      where: { patientId, entity: "TherapyPhase" },
+      orderBy: { occurredAt: "desc" },
+    });
+    expect(audit?.previousValue).toBe("AC");
+    expect(audit?.newValue).toBe("TH");
+    expect(audit?.detail).toContain("no longer receiving Anthracyclines");
+    expect(audit?.detail).toContain("now on HER2-targeted therapy");
+  });
+
+  it("does not record a phase-transition audit entry when the active phase has not changed", async () => {
+    const created = await register({
+      name: "No Transition",
+      age: 54,
+      treatmentCourse: courseFromPreset("breast_ac_th"),
+      therapy: ["anthracycline", "her2"],
+    });
+    const patientId = (created.patient as { id: string }).id;
+    const stored = await read(patientId);
+
+    await call<{ patient: Doc; updatedAt: string }>(recordRoute.PUT, {
+      as: CLINICIAN_A,
+      method: "PUT",
+      params: { patientId },
+      body: { ...(stored as Doc), plan: "Routine follow-up.", expectedUpdatedAt: created.updatedAt },
+    });
+
+    const audit = await db().auditEvent.findFirst({ where: { patientId, entity: "TherapyPhase" } });
+    expect(audit).toBeNull();
   });
 
   /* --------------------------------------------------------- validation */

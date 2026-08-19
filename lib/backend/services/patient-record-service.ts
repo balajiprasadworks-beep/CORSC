@@ -46,6 +46,7 @@ import { diffFields, recordAudit, recordAuditBatch, type AuditInput } from "@/li
 import { enginePatientInclude, toEnginePatientRecord } from "@/lib/backend/services/engine-patient";
 import { ANTHRACYCLINE_AGENTS } from "@/lib/anthracycline";
 import { THERAPY_CLASSES, INVESTIGATIONS, SYMPTOMS } from "@/lib/clinical-data";
+import { phaseTransitionReason } from "@/lib/treatment-course";
 import { RISK_FACTOR_IDS as KNOWN_RISK_FACTOR_IDS } from "@/lib/backend/validation";
 import { classifyDrug } from "@/lib/medication-engine";
 
@@ -264,6 +265,21 @@ export async function writePatientRecord(
       previous: before.risk?.category,
       next: engineAfter.risk?.category,
       detail: "Recalculated from the recorded data. Not a clinician override.",
+    });
+  }
+
+  const phaseTransition = detectPhaseTransition(before.treatmentCourse, engineAfter.treatmentCourse);
+  if (phaseTransition) {
+    audits.push({
+      ...auditBase,
+      action: "therapyChanged",
+      category: "clinical",
+      entity: "TherapyPhase",
+      entityId: patientId,
+      field: "activePhase",
+      previous: phaseTransition.from.name,
+      next: phaseTransition.to.name,
+      detail: phaseTransition.reason,
     });
   }
 
@@ -554,6 +570,37 @@ async function writeTherapy(
   return plan.id;
 }
 
+type EnginePhase = { id: string; name: string; agents: unknown[] };
+type EngineCourse = { activePhaseId: string | null; phases: EnginePhase[] } | null | undefined;
+
+/**
+ * Whether this write moved the patient onto a different active phase, and
+ * why that matters clinically.
+ *
+ * Read from the before/after engine records rather than the raw request body,
+ * so this fires exactly once per write regardless of how many other fields
+ * changed alongside the phase, and never fires from a phase id that was sent
+ * but did not actually take effect (an unknown id, for instance).
+ *
+ * Deliberately silent when either side cannot be resolved to a phase — a
+ * course moving from unstructured to structured for the first time is not a
+ * transition between two named phases, it is the course being built, and the
+ * generic `patientEdited` audit already covers that.
+ */
+function detectPhaseTransition(
+  before: EngineCourse,
+  after: EngineCourse
+): { from: EnginePhase; to: EnginePhase; reason: string } | null {
+  if (!before || !after) return null;
+  if (before.activePhaseId === after.activePhaseId) return null;
+
+  const from = before.phases.find((phase) => phase.id === before.activePhaseId);
+  const to = after.phases.find((phase) => phase.id === after.activePhaseId);
+  if (!from || !to) return null;
+
+  return { from, to, reason: phaseTransitionReason(from, to) };
+}
+
 /**
  * Replaces the phases of a course.
  *
@@ -592,6 +639,7 @@ async function writeTreatmentPhases(
         schedule: toText(phase.schedule, 200),
         maintenance: phase.maintenance === true,
         transitionCondition: toText(phase.transitionCondition, 400),
+        activatedOn: toDate(phase.activatedOn),
       },
     });
 

@@ -510,6 +510,15 @@ model TherapyPhase {
   /// What moves the patient on from this phase, where the service records it.
   transitionCondition String? @map("transition_condition")
 
+  /// When this phase first became the active phase. Null until it does.
+  ///
+  /// Not "planned start date" — a phase can be recorded before the patient
+  /// reaches it. This is when a clinician actually confirmed the transition,
+  /// which is what the timeline and the audit trail need: the record of when
+  /// the patient's surveillance schedule actually changed, not when it was
+  /// expected to.
+  activatedOn DateTime? @map("activated_on") @db.Date
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

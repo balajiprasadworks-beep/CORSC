@@ -221,6 +221,7 @@ function toTreatmentCourse(plan: PatientWithClinicalData["therapyPlans"][number]
       schedule: phase.schedule,
       maintenance: phase.maintenance,
       transitionCondition: phase.transitionCondition,
+      activatedOn: isoDay(phase.activatedOn),
     })),
     activePhaseId: plan.activePhaseKey || phases[0]?.key || null,
     libraryVersion: null,

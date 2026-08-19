@@ -42,6 +42,7 @@ import {
 import {
   ENTRY_METHODS,
   ENTRY_METHOD_LIST,
+  activePhase,
   courseFromPreset,
   courseReview,
   createAgent,
@@ -51,6 +52,8 @@ import {
   mergeTherapySelection,
   orderedPhases,
   phaseText,
+  phaseTransitionReason,
+  setActivePhase,
 } from "@/lib/treatment-course";
 
 const inputBase =
@@ -385,10 +388,91 @@ function RegimenBuilder({ course, onCourseChange }) {
 
 /* ------------------------------------------------------------- summary */
 
-function CourseSummary({ course }) {
+/**
+ * One phase row, with the control to mark it active.
+ *
+ * Advancing is a confirmation, not a click: the clinician sees the same
+ * "current therapy changed from X to Y — what that means" sentence the
+ * timeline and the audit trail will carry, before it becomes true of the
+ * record. Mirrors the spec's own requirement that a phase transition happen
+ * "by cycle number/date and also manual confirmation".
+ */
+function PhaseRow({ phase, index, isLast, isActive, course, onConfirm }) {
+  const [confirming, setConfirming] = useState(false);
+  const current = activePhase(course);
+  const reason = current && current.id !== phase.id ? phaseTransitionReason(current, phase) : null;
+
+  return (
+    <li className="text-[13px] text-slate-700">
+      <div className="flex items-start gap-2">
+        <span
+          className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[10.5px] font-semibold ring-1 ${
+            isActive ? "bg-teal-700 text-white ring-teal-700" : "bg-white text-slate-500 ring-slate-200"
+          }`}
+        >
+          {index + 1}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-baseline gap-x-1.5">
+            <span className="font-medium text-slate-900">{phase.name || `Phase ${index + 1}`}</span>
+            {isActive && <StatusChip tone="ok">current</StatusChip>}
+            {phase.maintenance && <span className="text-[11.5px] text-teal-700">maintenance</span>}
+          </span>
+          {phaseText(phase) && <span className="block text-slate-600">{phaseText(phase)}</span>}
+          {phase.activatedOn && (
+            <span className="block text-[11.5px] text-slate-400">Active from {phase.activatedOn}</span>
+          )}
+        </span>
+        {!isActive && !confirming && (
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            className="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11.5px] font-semibold text-slate-600 transition hover:border-teal-300 hover:text-teal-700"
+          >
+            Mark active
+          </button>
+        )}
+      </div>
+
+      {confirming && (
+        <div className="ml-7 mt-2 rounded-lg border border-teal-200 bg-teal-50/60 p-2.5">
+          <p className="text-[12.5px] leading-relaxed text-slate-700">{reason}</p>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                onConfirm(phase.id);
+                setConfirming(false);
+              }}
+              className="rounded-lg bg-teal-700 px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-teal-800"
+            >
+              Confirm — this is now the active phase
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              className="rounded-lg px-3 py-1.5 text-[12px] font-medium text-slate-500 hover:text-slate-700"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!isLast && (
+        <div className="ml-2.5 flex h-3 items-center">
+          <ArrowRight size={12} className="text-slate-300" aria-hidden="true" />
+        </div>
+      )}
+    </li>
+  );
+}
+
+function CourseSummary({ course, onCourseChange }) {
   const review = courseReview(course);
   const derived = derivedTherapyClasses(course);
   const phases = orderedPhases(course);
+  const current = activePhase(course);
 
   if (review.status === "empty") return null;
 
@@ -401,19 +485,15 @@ function CourseSummary({ course }) {
       {phases.length > 0 ? (
         <ol className="mb-3 space-y-1.5">
           {phases.map((phase, index) => (
-            <li key={phase.id} className="flex items-start gap-2 text-[13px] text-slate-700">
-              <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-white text-[10.5px] font-semibold text-slate-500 ring-1 ring-slate-200">
-                {index + 1}
-              </span>
-              <span className="min-w-0">
-                <span className="font-medium text-slate-900">{phase.name || `Phase ${index + 1}`}</span>
-                {phaseText(phase) && <span className="text-slate-600"> — {phaseText(phase)}</span>}
-                {phase.maintenance && <span className="ml-1.5 text-[11.5px] text-teal-700">maintenance</span>}
-              </span>
-              {index < phases.length - 1 && (
-                <ArrowRight size={13} className="mt-1 shrink-0 text-slate-300" aria-hidden="true" />
-              )}
-            </li>
+            <PhaseRow
+              key={phase.id}
+              phase={phase}
+              index={index}
+              isLast={index === phases.length - 1}
+              isActive={current?.id === phase.id}
+              course={course}
+              onConfirm={(phaseId) => onCourseChange(setActivePhase(course, phaseId))}
+            />
           ))}
         </ol>
       ) : (
@@ -580,7 +660,7 @@ export function RegimenSelector({ value, onChange }) {
           />
         )}
 
-        <CourseSummary course={course} />
+        <CourseSummary course={course} onCourseChange={(next) => applyCourse(next)} />
       </Stack>
     </Panel>
   );

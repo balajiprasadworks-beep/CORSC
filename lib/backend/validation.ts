@@ -280,6 +280,8 @@ const treatmentPhaseSchema = z
     schedule: optionalText(200),
     maintenance: z.boolean().optional(),
     transitionCondition: optionalText(400),
+    /** When this phase first became active. Set once, by the client, never by a parsed date guess. */
+    activatedOn: optionalDate,
   })
   .passthrough();
 
