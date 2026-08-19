@@ -35,6 +35,13 @@ function SaveIndicator({ state }) {
   );
 }
 
+const MODE_STYLES = {
+  baseline: "bg-slate-100 text-slate-700",
+  routine: "bg-emerald-50 text-emerald-700",
+  abnormal: "bg-red-50 text-red-700",
+  survivorship: "bg-violet-50 text-violet-700",
+};
+
 export function StickyPatientHeader({
   patient,
   cycle,
@@ -42,6 +49,7 @@ export function StickyPatientHeader({
   latestLVEF,
   treatmentPhase,
   treatmentPhasePosition,
+  workflowMode,
   saveState,
   onBack,
   sections,
@@ -85,6 +93,14 @@ export function StickyPatientHeader({
               {phaseLabel && (
                 <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-semibold text-teal-700">
                   {phaseLabel}
+                </span>
+              )}
+              {workflowMode && (
+                <span
+                  title={workflowMode.reasons?.join(" ")}
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${MODE_STYLES[workflowMode.mode] || MODE_STYLES.routine}`}
+                >
+                  {workflowMode.label}
                 </span>
               )}
             </div>

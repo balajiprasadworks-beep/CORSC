@@ -298,10 +298,19 @@ export function RiskSection({ patient, setPatient, encounter, setEncounter, pict
         </Panel>
       )}
 
-      <Panel title="Missing baseline data" subtitle="Gaps that weaken later comparisons, weighted by what they actually change">
+      <Panel
+        title={completeness.visitTypeId ? "Missing for this visit" : "Missing baseline data"}
+        subtitle={
+          completeness.visitTypeId
+            ? "What this visit type still needs, split into what the plan depends on and what is documentation only"
+            : "Gaps that weaken later comparisons, weighted by what they actually change"
+        }
+      >
         {completeness.missing.length === 0 ? (
-          <Callout tone="ok" title="Baseline dataset complete">
-            All baseline values needed for meaningful serial comparison are recorded.
+          <Callout tone="ok" title={completeness.visitTypeId ? "Visit complete" : "Baseline dataset complete"}>
+            {completeness.visitTypeId
+              ? "Everything this visit type calls for is recorded."
+              : "All baseline values needed for meaningful serial comparison are recorded."}
           </Callout>
         ) : (
           <div className="space-y-1.5">
