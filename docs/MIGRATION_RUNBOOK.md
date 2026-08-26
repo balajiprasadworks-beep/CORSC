@@ -33,9 +33,26 @@ the host and port it connected to, and that line is the check.
 
 ## Step 1 — preflight, read-only
 
-Run this against the target database over `DIRECT_URL`. Every statement is a
-`SELECT`; nothing here writes. It answers "what does the database actually
-contain, and does the migration history agree with it?"
+```sh
+npm run db:verify -- --save
+```
+
+`prisma/verify-live.ts` is read-only — no create, update, delete or DDL — and
+is safe to run against production. It reports the connection, checks every
+object the current code requires, records row counts to a snapshot file for the
+comparison in step 3, and then exercises the application's own read path
+(`enginePatientInclude`, `toEnginePatientRecord`, the worklist row builder, the
+clinical picture) against a real stored record.
+
+Before the migration it is *expected* to fail, and the failure it prints is the
+one the website is showing. That is the confirmation you are looking at the
+right problem.
+
+Its `--patient <uuid>` option verifies a named record rather than the most
+recently updated one.
+
+For the underlying catalogue queries, or to run them by hand in the Supabase SQL
+editor, each is below. Every statement is a `SELECT`; nothing here writes.
 
 ```sql
 -- 1. What Prisma believes it has applied, and whether any attempt failed.
@@ -147,11 +164,22 @@ Re-run the preflight. Expect the inverse of what it showed before:
   result that warrants stopping and investigating: these migrations add
   structures and must not touch a row.
 
+Or let the script do all of it, including the row-count comparison against the
+snapshot step 1 saved:
+
+```sh
+npm run db:verify
+```
+
+Every line must read `ok`. The three `therapy_phases_*` policies are the one
+exception: they are created only where an `auth.users` table exists, so on a
+non-Supabase database the script prints them as a `note` rather than a failure.
+
 Then confirm the application agrees, with `CORSC_REQUIRE_DB=1` so the
 database-backed suites fail rather than skip:
 
 ```sh
-CORSC_REQUIRE_DB=1 DATABASE_URL="$DIRECT_URL" npx vitest run tests/database tests/integration
+CORSC_REQUIRE_DB=1 npx vitest run tests/database tests/integration
 ```
 
 ## Repairing an inconsistent history
