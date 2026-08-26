@@ -37,6 +37,43 @@ export async function disconnect() {
 }
 
 /**
+ * Refuses to run against anything that does not look like a test database.
+ *
+ * resetDatabase() TRUNCATEs every clinical table. Pointed at production by a
+ * stray DATABASE_URL — a copied shell, a runbook followed one line too far —
+ * it would destroy the record of every patient, and nothing in the suite would
+ * look wrong while it happened. The cost of the check is nil; the cost of not
+ * having it is unrecoverable, so this is deliberately paranoid rather than
+ * clever: a local host or a database whose name says "test", nothing else.
+ *
+ * CORSC_ALLOW_DESTRUCTIVE_TEST_DB=1 overrides it, for a CI database that
+ * satisfies neither. Setting that against production is on whoever sets it.
+ */
+function assertDisposable(url: string) {
+  if (process.env.CORSC_ALLOW_DESTRUCTIVE_TEST_DB === "1") return;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("DATABASE_URL is not a URL, so it cannot be checked before TRUNCATE. Refusing.");
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const name = parsed.pathname.replace(/^\//, "").toLowerCase();
+  const local = host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "postgres" || host === "db";
+  const named = /test|rehearsal/.test(name);
+
+  if (!local && !named) {
+    throw new Error(
+      `Refusing to TRUNCATE: "${name}" on host "${host}" does not look like a test database. ` +
+      "resetDatabase() empties every clinical table. If this really is disposable, " +
+      "set CORSC_ALLOW_DESTRUCTIVE_TEST_DB=1."
+    );
+  }
+}
+
+/**
  * Empties every table between tests.
  *
  * TRUNCATE rather than DELETE: the audit table's append-only trigger is a
@@ -45,6 +82,7 @@ export async function disconnect() {
  * fixture can still be reset.
  */
 export async function resetDatabase() {
+  assertDisposable(DATABASE_URL);
   const prisma = db();
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE

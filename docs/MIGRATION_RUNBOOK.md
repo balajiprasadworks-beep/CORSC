@@ -175,12 +175,16 @@ Every line must read `ok`. The three `therapy_phases_*` policies are the one
 exception: they are created only where an `auth.users` table exists, so on a
 non-Supabase database the script prints them as a `note` rather than a failure.
 
-Then confirm the application agrees, with `CORSC_REQUIRE_DB=1` so the
-database-backed suites fail rather than skip:
-
-```sh
-CORSC_REQUIRE_DB=1 npx vitest run tests/database tests/integration
-```
+> [!CAUTION]
+> **Never point the database-backed test suites at production.** They call
+> `resetDatabase()` in `beforeEach`, which TRUNCATEs every clinical table —
+> running them against a real database destroys every patient record. They are
+> guarded (`tests/helpers/database.ts` refuses a `DATABASE_URL` that is neither
+> a local host nor a database named like a test one) but do not rely on the
+> guard: run them only against a disposable database.
+>
+> `npm run db:verify` is the check that is safe against production. It only
+> reads.
 
 ## Repairing an inconsistent history
 
@@ -232,3 +236,5 @@ Make it only after the catalogue has been read and shown to support it.
 | `prisma db push` | Reconciles the database to the schema file directly, dropping columns and tables that the schema no longer mentions, with no migration recorded. |
 | `prisma migrate dev` | May reset the database when it detects drift, and writes new migration files from the live database. A development command. |
 | `migrate resolve` without preflight | Records history that the database does not support, hiding the mismatch instead of fixing it. |
+| `vitest run tests` with `DATABASE_URL` set to production | The database-backed suites TRUNCATE every clinical table between tests. |
+| `npm run db:seed` against production | Writes synthetic patients into the real record. |
