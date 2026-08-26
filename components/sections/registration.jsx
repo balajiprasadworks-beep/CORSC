@@ -30,7 +30,7 @@ import {
 } from "@/components/kit";
 import { CYCLE_FREQUENCIES, THERAPY_CLASSES, riskStyle } from "@/lib/clinical-data";
 import { TROPONIN_ASSAYS } from "@/lib/cardiac-measurements";
-import { TIERS, assessRisk, factorsByTier, therapyList } from "@/lib/hfa-icos";
+import { TIERS, assessRisk, factorsByTier, resolveFactors, therapyList } from "@/lib/hfa-icos";
 import { therapyClassSources } from "@/lib/treatment-course";
 import { num } from "@/lib/vitals";
 
@@ -53,9 +53,14 @@ export function applyRegistrationChange(draft, patch) {
 export function RegistrationFields({ value, onChange, showRiskPreview = true }) {
   const risk = useMemo(() => assessRisk(value), [value]);
   const tiers = useMemo(() => factorsByTier(value.therapy), [value.therapy]);
+  /* Resolved against every selected therapy's own proforma, not just the
+     governing (highest-category) one — otherwise a row that only belongs to
+     a non-governing therapy can never be found here, so its checkbox always
+     renders unticked and clicking it appears to do nothing. */
+  const resolvedFactors = useMemo(() => resolveFactors(value), [value]);
   const derivedById = useMemo(
-    () => Object.fromEntries(risk.factors.map((factor) => [factor.id, factor])),
-    [risk.factors]
+    () => Object.fromEntries(resolvedFactors.map((factor) => [factor.id, factor])),
+    [resolvedFactors]
   );
   const styles = riskStyle(risk.category);
   const set = (patch) => onChange(patch);
