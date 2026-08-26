@@ -53,7 +53,7 @@ export async function resetDatabase() {
       "visit_medication_decisions", "visit_task_completions", "visit_interval_answers",
       "visit_system_exam_components", "visit_system_exams", "visit_symptoms",
       "visit_vitals", "visits", "anthracycline_doses", "therapy_cycles",
-      "therapy_agents", "therapy_class_assignments", "therapy_plans",
+      "therapy_agents", "therapy_phases", "therapy_class_assignments", "therapy_plans",
       "patient_medications", "cancer_diagnoses", "contraindication_assertions",
       "risk_factor_assertions", "patient_history_entries", "patient_toxicity_status",
       "patient_baselines", "care_team_members", "patients", "clinicians"

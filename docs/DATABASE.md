@@ -100,7 +100,8 @@ erDiagram
 | `cancer_diagnoses` | Site, type, histology, stage, intent. |
 | `therapy_plans` | A planned course. A patient may have several. |
 | `therapy_class_assignments` | The cardiotoxicity-relevant classes on a plan — **always a list**. |
-| `therapy_agents` | Individual agents and planned doses. |
+| `therapy_phases` | The ordered phases of a structured course. A free-text regimen has none, deliberately. |
+| `therapy_agents` | Individual agents and planned doses, each optionally bound to a phase. |
 | `therapy_cycles` | One row per cycle, with delay and toxicity reasons. |
 | `anthracycline_doses` | The dose ledger, with BSA, equivalence model, and the reason where a dose could not be converted. |
 | `medications` | The formulary. Reference data, not patient data. |
