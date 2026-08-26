@@ -16,15 +16,21 @@ import { createEncounter, createPatient, todayISO } from "@/lib/patient-model";
 
 export function RegisterPatient({ onCancel, onCreate }) {
   const [draft, setDraft] = useState(() => applyRegistrationChange(createPatient({}), {}));
+  const [submitting, setSubmitting] = useState(false);
   const canRegister = Boolean(draft.name && draft.diagnosis && draft.therapy);
 
-  function submit() {
-    if (!canRegister) return;
-    onCreate({
-      ...draft,
-      registeredDate: todayISO(),
-      draftEncounter: createEncounter("Baseline", { date: todayISO() }),
-    });
+  async function submit() {
+    if (!canRegister || submitting) return;
+    setSubmitting(true);
+    try {
+      await onCreate({
+        ...draft,
+        registeredDate: todayISO(),
+        draftEncounter: createEncounter("Baseline", { date: todayISO() }),
+      });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -68,16 +74,20 @@ export function RegisterPatient({ onCancel, onCreate }) {
         <div className="sticky bottom-0 mt-4 border-t border-slate-200 bg-[#F6F7F5] py-3">
           <button
             type="button"
-            disabled={!canRegister}
+            disabled={!canRegister || submitting}
             onClick={submit}
             className={`flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-[15px] font-semibold transition ${
-              canRegister ? "bg-slate-900 text-white hover:bg-slate-800" : "cursor-not-allowed bg-slate-200 text-slate-400"
+              canRegister && !submitting
+                ? "bg-slate-900 text-white hover:bg-slate-800"
+                : "cursor-not-allowed bg-slate-200 text-slate-400"
             }`}
           >
-            Register and open workflow <ArrowRight size={17} aria-hidden="true" />
+            {submitting ? "Registering…" : (
+              <>Register and open workflow <ArrowRight size={17} aria-hidden="true" /></>
+            )}
           </button>
           <p className="mt-2 text-center text-[12px] text-slate-400">
-            {canRegister ? "Ready to register." : "Name, diagnosis and planned therapy are required."}
+            {submitting ? "Saving the new record…" : canRegister ? "Ready to register." : "Name, diagnosis and planned therapy are required."}
           </p>
         </div>
       </div>

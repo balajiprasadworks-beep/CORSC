@@ -146,6 +146,7 @@ function CORSCWorkspace({ user, onSignOut }) {
   async function createPatientRecord(patient) {
     if (!driver) return;
     setSaveState("saving");
+    setSaveError("");
     try {
       const result = await patientRepository(driver).create(user.id, patient);
       updatedAt.current = result.updatedAt ?? null;
@@ -224,16 +225,18 @@ function CORSCWorkspace({ user, onSignOut }) {
         </div>
       )}
 
-      {saveError && view === "workflow" && (
+      {saveError && (view === "workflow" || view === "register") && (
         <div className="no-print sticky top-0 z-50 flex flex-wrap items-center justify-between gap-2 bg-red-600 px-4 py-2 text-[13px] font-medium text-white">
           <span>{saveError}</span>
-          <button
-            type="button"
-            onClick={() => openPatient(selected?.id)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 px-2.5 py-1 font-semibold hover:bg-white/25"
-          >
-            <RefreshCw className="size-3.5" aria-hidden="true" /> Reload the record
-          </button>
+          {view === "workflow" && (
+            <button
+              type="button"
+              onClick={() => openPatient(selected?.id)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 px-2.5 py-1 font-semibold hover:bg-white/25"
+            >
+              <RefreshCw className="size-3.5" aria-hidden="true" /> Reload the record
+            </button>
+          )}
         </div>
       )}
 
@@ -246,12 +249,21 @@ function CORSCWorkspace({ user, onSignOut }) {
             rows={rows}
             patients={localPatients ?? undefined}
             onSelect={openPatient}
-            onNew={() => setView("register")}
+            onNew={() => {
+              setSaveError("");
+              setView("register");
+            }}
             banner={banner}
           />
         </>
       ) : view === "register" ? (
-        <RegisterPatient onCancel={() => setView("list")} onCreate={createPatientRecord} />
+        <RegisterPatient
+          onCancel={() => {
+            setSaveError("");
+            setView("list");
+          }}
+          onCreate={createPatientRecord}
+        />
       ) : selected ? (
         <PatientWorkflow
           patient={selected}
