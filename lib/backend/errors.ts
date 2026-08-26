@@ -132,6 +132,20 @@ export function toApiError(error: unknown): ApiError {
   if (message.includes("violates check constraint")) {
     return ApiError.clinicallyInvalid("A value in this request is outside the range the record allows.");
   }
+  /*
+   * SQLSTATE 42501 — the database refused the statement under row-level
+   * security. This is never something the clinician typed: it means the API's
+   * database role is being judged by policies written for the browser's
+   * PostgREST path, so no write it attempts can succeed. Reported as a
+   * configuration fault, and named, because as a bare 500 it is indistinguishable
+   * from a bug in the request and sends whoever is debugging it to the wrong place.
+   */
+  if (code === "42501" || message.includes("row-level security policy")) {
+    return ApiError.notConfigured(
+      "The database refused this write under row-level security. The CORSC API's database role " +
+        "cannot write to the patient tables, so no record can be saved until that is corrected."
+    );
+  }
 
   return new ApiError("internal", "Something went wrong. The error has been logged.");
 }
