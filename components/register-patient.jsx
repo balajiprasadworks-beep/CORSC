@@ -17,7 +17,9 @@ import { createEncounter, createPatient, todayISO } from "@/lib/patient-model";
 export function RegisterPatient({ onCancel, onCreate }) {
   const [draft, setDraft] = useState(() => applyRegistrationChange(createPatient({}), {}));
   const [submitting, setSubmitting] = useState(false);
-  const canRegister = Boolean(draft.name && draft.diagnosis && draft.therapy);
+  // therapy is a list; `Boolean([])` is true, so an empty one has to be
+  // checked by length or the "therapy is required" rule never actually fires.
+  const canRegister = Boolean(draft.name && draft.diagnosis && draft.therapy?.length);
 
   async function submit() {
     if (!canRegister || submitting) return;
