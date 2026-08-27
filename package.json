@@ -15,7 +15,8 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "node --experimental-strip-types --import ./prisma/alias-loader.mjs prisma/seed.ts",
-    "db:import-formulary": "node --experimental-strip-types --import ./prisma/alias-loader.mjs prisma/import-formulary.ts"
+    "db:import-formulary": "node --experimental-strip-types --import ./prisma/alias-loader.mjs prisma/import-formulary.ts",
+    "db:verify": "node --experimental-strip-types --import ./prisma/alias-loader.mjs prisma/verify-live.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
