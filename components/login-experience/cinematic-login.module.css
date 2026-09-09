@@ -1,0 +1,750 @@
+/* Ported from the supplied corsc-login-experience reference prototype.
+   Pure CSS transform/keyframe animation, not a 3D engine — this exists
+   specifically to animate the real corsc-heart.png / corsc-background.png
+   assets, which a canvas-based camera can't get any benefit from since
+   they're flat raster images to begin with. See CLAUDE_HANDOFF.md's own
+   note: a true 3D pass later replaces the PNG with a GLB and keeps this
+   same choreography. */
+
+:root {
+  --navy: #0b1f3a;
+  --navy-2: #123055;
+  --ink: #213b58;
+  --muted: #657991;
+  --line: rgba(39, 73, 104, 0.15);
+  --accent: #e47f55;
+  --teal: #0f6e6e;
+}
+
+.scene {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  min-height: 680px;
+  overflow: hidden;
+  isolation: isolate;
+  background: #eff4f7;
+  color: var(--ink);
+}
+.sceneBackground {
+  position: absolute !important;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  z-index: -5;
+  transform: scale(1.02);
+  filter: saturate(0.86) contrast(0.96);
+}
+.atmosphere {
+  position: absolute;
+  inset: 0;
+  z-index: -4;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.12), transparent 34%),
+    linear-gradient(90deg, rgba(250, 252, 253, 0.68) 0%, rgba(247, 249, 250, 0.12) 46%, rgba(246, 249, 251, 0.16) 100%);
+  pointer-events: none;
+}
+.world {
+  position: absolute;
+  inset: 0;
+}
+
+.topbar {
+  position: absolute;
+  top: 27px;
+  left: 5.5vw;
+  right: 5.5vw;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  z-index: 20;
+  opacity: 0;
+  transform: translateY(-10px);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.brandMark {
+  color: var(--navy);
+  display: grid;
+  place-items: center;
+}
+.brandName {
+  letter-spacing: 0.18em;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--navy);
+  line-height: 1;
+}
+.brandSubtitle {
+  margin-top: 5px;
+  font-size: 11px;
+  color: #6f8094;
+}
+.topbar nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  color: #536b83;
+  font-size: 13px;
+}
+.topbar nav a {
+  text-decoration: none;
+  color: inherit;
+  transition: color 0.2s ease;
+}
+.topbar nav a:hover {
+  color: var(--navy);
+}
+.navDivider {
+  width: 1px;
+  height: 14px;
+  background: rgba(44, 67, 90, 0.18);
+}
+
+.heroCopy {
+  position: absolute;
+  left: 7.8vw;
+  top: 23.5vh;
+  width: min(34vw, 525px);
+  z-index: 10;
+  opacity: 0;
+  transform: translateY(26px);
+}
+.eyebrow {
+  margin: 0 0 13px;
+  color: #6b8097;
+  font-size: 12px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.heroCopy h1 {
+  margin: 0;
+  color: var(--navy);
+  font-weight: 700;
+  font-size: clamp(38px, 4.4vw, 60px);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+.heroCopy h1 span {
+  color: #7391ad;
+}
+.lead {
+  margin: 26px 0 0;
+  max-width: 520px;
+  color: #5d7186;
+  font-size: 16px;
+  line-height: 1.65;
+}
+.features {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 11px 12px;
+  margin-top: 36px;
+}
+.featurePill {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  color: #566d84;
+  font-size: 12px;
+  line-height: 1.3;
+}
+.featureIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid rgba(65, 90, 111, 0.1);
+  box-shadow: 0 8px 22px rgba(46, 67, 87, 0.08);
+  color: var(--teal);
+  flex: none;
+}
+
+.heartStage {
+  position: absolute;
+  left: 50%;
+  top: 51%;
+  width: min(36vw, 560px);
+  aspect-ratio: 1 / 1;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  z-index: 8;
+  perspective: 1200px;
+}
+.heroHeart {
+  position: relative !important;
+  width: 84% !important;
+  height: auto !important;
+  object-fit: contain;
+  filter: drop-shadow(0 35px 35px rgba(10, 41, 67, 0.15));
+  transform-origin: 50% 50%;
+  animation: heartIntro 5.8s cubic-bezier(0.16, 0.79, 0.2, 1) both;
+  z-index: 4;
+}
+.heartHalo {
+  position: absolute;
+  width: 73%;
+  height: 73%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(225, 239, 246, 0.46) 0%, rgba(227, 239, 245, 0.18) 43%, transparent 69%);
+  filter: blur(17px);
+  animation: haloIntro 5.5s ease both;
+}
+
+.orbitSystem {
+  position: absolute;
+  left: 50%;
+  top: 51%;
+  /* Narrower than the reference prototype's 760px: the headline column
+     and login card leave roughly a 360px gap around the heart at a
+     typical desktop width, and the ring needs to fit inside that, not
+     the 40-50vw the prototype's own wider layout allowed for. */
+  width: min(24vw, 400px);
+  height: min(24vw, 400px);
+  transform: translate(-50%, -50%);
+  /* Above the login card/headline, not below: a viewport where the ring
+     still brushes a side panel shows the node on top rather than hiding
+     it entirely underneath. */
+  z-index: 35;
+  opacity: 0;
+}
+.orbitRing {
+  position: absolute;
+  inset: 7%;
+  border: 1px solid rgba(80, 103, 123, 0.18);
+  border-radius: 50%;
+  transform: rotate(-12deg);
+}
+.orbitRingB {
+  inset: 14%;
+  border-color: rgba(79, 103, 124, 0.11);
+  transform: rotate(12deg) scaleX(0.94);
+}
+.orbitNode {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 15px;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(50, 73, 93, 0.09);
+  border-radius: 18px;
+  box-shadow: 0 16px 40px rgba(52, 76, 97, 0.1);
+  backdrop-filter: blur(12px);
+  color: #29435d;
+  font-size: 12px;
+  white-space: nowrap;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+.orbitNode:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 44px rgba(52, 76, 97, 0.16);
+}
+.orbitNodeIcon {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--teal);
+  background: #f0f7f8;
+  flex: none;
+}
+.orbitA {
+  left: 14%;
+  top: 6%;
+}
+.orbitB {
+  right: 12%;
+  top: 10%;
+}
+.orbitC {
+  left: 10%;
+  bottom: 8%;
+}
+.orbitD {
+  right: 8%;
+  bottom: 6%;
+}
+
+.loginShell {
+  position: absolute;
+  right: 6.8vw;
+  top: 50%;
+  transform: translateY(-50%) translateX(50px);
+  opacity: 0;
+  z-index: 30;
+}
+.loginCard {
+  width: min(31vw, 460px);
+  min-width: 360px;
+  padding: 30px 34px 26px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(79, 98, 113, 0.11);
+  border-radius: 22px;
+  box-shadow: 0 36px 75px rgba(30, 53, 72, 0.15), 0 6px 20px rgba(30, 53, 72, 0.06);
+  backdrop-filter: blur(18px);
+}
+.loginEmblem {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 11px;
+  background: var(--navy);
+  color: #fff;
+  border-radius: 15px;
+  box-shadow: 0 12px 24px rgba(11, 31, 58, 0.2);
+}
+.loginBrand {
+  text-align: center;
+  letter-spacing: 0.2em;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--teal);
+}
+.loginCaption {
+  margin-top: 6px;
+  text-align: center;
+  color: #7a8796;
+  font-size: 11px;
+}
+.loginCard h2 {
+  margin: 22px 0 8px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 24px;
+  color: var(--navy);
+}
+.loginDescription {
+  margin: 0 auto 24px;
+  text-align: center;
+  color: #6d7c8d;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.fieldLabel {
+  display: block;
+  margin: 0 0 8px;
+  color: #3e5570;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.fieldWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.fieldIcon {
+  position: absolute;
+  left: 13px;
+  color: #8292a3;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.fieldWrap input {
+  width: 100%;
+  height: 46px;
+  border: 1px solid rgba(52, 77, 99, 0.16);
+  border-radius: 11px;
+  background: #eef4fa;
+  color: #223c5a;
+  padding: 0 42px 0 39px;
+  outline: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  transition: 0.2s ease;
+  font-size: 14px;
+}
+.fieldWrap input:focus-visible {
+  border-color: rgba(15, 110, 110, 0.5);
+  box-shadow: 0 0 0 3px rgba(15, 110, 110, 0.14);
+}
+.fieldWrap input::placeholder {
+  color: #9aa8b6;
+}
+.fieldAction {
+  position: absolute;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: #7f90a2;
+  cursor: pointer;
+  border-radius: 8px;
+}
+.fieldAction:hover {
+  color: #3e5570;
+}
+.fieldAction:focus-visible,
+.textLink:focus-visible,
+.signinButton:focus-visible,
+.orbitNode:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+.formRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 2px 0 20px;
+  font-size: 12.5px;
+}
+.remember {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: #50667e;
+  cursor: pointer;
+}
+.remember input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.fakeCheck {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  border: 1px solid #a4b4c1;
+  background: #fff;
+  position: relative;
+  flex: none;
+}
+.remember input:checked + .fakeCheck {
+  background: var(--navy);
+  border-color: var(--navy);
+}
+.remember input:checked + .fakeCheck::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.textLink {
+  border: 0;
+  background: none;
+  color: var(--teal);
+  padding: 0;
+  cursor: pointer;
+  font-size: inherit;
+  font-weight: 500;
+}
+.textLink:hover {
+  color: var(--navy);
+}
+.signinButton {
+  width: 100%;
+  height: 50px;
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  background: linear-gradient(180deg, var(--navy-2), var(--navy));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 14.5px;
+  box-shadow: 0 14px 24px rgba(11, 31, 58, 0.18);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+  cursor: pointer;
+}
+.signinButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 28px rgba(11, 31, 58, 0.22);
+}
+.signinButton:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+.loginFooter {
+  margin-top: 20px;
+  text-align: center;
+  color: #748394;
+  font-size: 11.5px;
+}
+.loginFooter span {
+  color: #485f77;
+}
+.formError {
+  margin: 0 0 16px;
+  padding: 11px 13px;
+  border-radius: 10px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.resetNotice {
+  margin: 0 0 16px;
+  font-size: 12px;
+}
+.resetNotice[data-tone="error"] {
+  color: #b91c1c;
+}
+.resetNotice[data-tone="ok"] {
+  color: var(--teal);
+}
+
+.microFooter {
+  position: absolute;
+  left: 7.8vw;
+  bottom: 32px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: rgba(67, 88, 108, 0.63);
+  opacity: 0;
+}
+
+.sceneIntro .heroHeart {
+  animation-delay: 0s;
+}
+.sceneIntro .topbar,
+.sceneIntro .heroCopy,
+.sceneIntro .orbitSystem,
+.sceneIntro .loginShell,
+.sceneIntro .microFooter {
+  pointer-events: none;
+}
+.sceneRevealed .topbar {
+  animation: revealTop 0.75s 0.2s cubic-bezier(0.18, 0.74, 0.2, 1) both;
+}
+.sceneRevealed .heroCopy {
+  animation: revealLeft 0.9s 0.2s cubic-bezier(0.18, 0.74, 0.2, 1) both;
+}
+.sceneRevealed .orbitSystem {
+  animation: revealOrbit 0.9s 0.45s cubic-bezier(0.18, 0.74, 0.2, 1) both;
+}
+.sceneRevealed .loginShell {
+  animation: revealLogin 0.9s 0.7s cubic-bezier(0.16, 0.78, 0.2, 1) both;
+}
+.sceneRevealed .microFooter {
+  animation: revealBottom 0.7s 0.9s ease both;
+}
+.sceneRevealed .heroHeart {
+  animation: heartIdle 7s ease-in-out infinite;
+}
+.sceneRevealed .orbitRing {
+  animation: ringDrift 30s linear infinite;
+}
+.sceneRevealed .orbitRingB {
+  animation: ringDriftReverse 42s linear infinite;
+}
+.sceneRevealed .orbitA {
+  animation: nodeFloat 6.8s ease-in-out infinite;
+}
+.sceneRevealed .orbitB {
+  animation: nodeFloat 7.5s ease-in-out 0.3s infinite;
+}
+.sceneRevealed .orbitC {
+  animation: nodeFloat 8.2s ease-in-out 0.6s infinite;
+}
+.sceneRevealed .orbitD {
+  animation: nodeFloat 7.2s ease-in-out 0.2s infinite;
+}
+
+@keyframes heartIntro {
+  0% {
+    opacity: 0;
+    transform: translateZ(0) scale(1.34) rotateY(-7deg) rotateZ(-2deg);
+  }
+  16% {
+    opacity: 1;
+  }
+  52% {
+    transform: translateZ(0) scale(1.16) rotateY(9deg) rotateZ(1deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translateZ(0) scale(0.78) rotateY(0deg) rotateZ(0deg);
+  }
+}
+@keyframes haloIntro {
+  0% {
+    opacity: 0.1;
+    transform: scale(0.7);
+  }
+  45% {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0.35;
+    transform: scale(0.83);
+  }
+}
+@keyframes heartIdle {
+  0%,
+  100% {
+    transform: scale(0.78) rotateY(-1.3deg) translateY(0);
+  }
+  50% {
+    transform: scale(0.8) rotateY(1.3deg) translateY(-7px);
+  }
+}
+@keyframes revealTop {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes revealLeft {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes revealOrbit {
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+@keyframes revealLogin {
+  to {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+  }
+}
+@keyframes revealBottom {
+  to {
+    opacity: 1;
+  }
+}
+@keyframes ringDrift {
+  to {
+    transform: rotate(348deg);
+  }
+}
+@keyframes ringDriftReverse {
+  to {
+    transform: rotate(-348deg) scaleX(0.94);
+  }
+}
+@keyframes nodeFloat {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -5px, 0);
+  }
+}
+
+@media (max-width: 1180px) {
+  .heroCopy {
+    left: 5vw;
+    width: 34vw;
+  }
+  .loginShell {
+    right: 3.6vw;
+  }
+  .loginCard {
+    min-width: 340px;
+    width: 34vw;
+  }
+  .heartStage {
+    width: 36vw;
+  }
+  .orbitSystem {
+    width: 26vw;
+  }
+}
+
+@media (max-width: 860px) {
+  .scene {
+    min-height: 1340px;
+    height: auto;
+    overflow: hidden;
+  }
+  .topbar {
+    left: 22px;
+    right: 22px;
+  }
+  .topbar nav {
+    display: none;
+  }
+  .heroCopy {
+    left: 24px;
+    top: 145px;
+    width: calc(100% - 48px);
+    text-align: center;
+  }
+  .heroCopy h1 {
+    font-size: clamp(36px, 11vw, 52px);
+  }
+  .lead {
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .features {
+    max-width: 480px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .heartStage {
+    top: 550px;
+    width: 58vw;
+  }
+  /* The orbit ring has nowhere to fit alongside the stacked feature list
+     without colliding with it — and the feature pills already name the
+     same four concepts in plainer, more mobile-appropriate text, so the
+     ring is dropped here rather than forced to overlap something. */
+  .orbitSystem {
+    display: none;
+  }
+  .loginShell {
+    left: 50%;
+    right: auto;
+    top: 830px;
+    transform: translateX(-50%) translateY(40px);
+  }
+  .sceneRevealed .loginShell {
+    animation: revealMobile 0.85s 0.7s cubic-bezier(0.16, 0.78, 0.2, 1) both;
+  }
+  .loginCard {
+    width: min(92vw, 460px);
+    min-width: 0;
+  }
+  .microFooter {
+    left: 24px;
+    bottom: 22px;
+  }
+}
+@keyframes revealMobile {
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene *,
+  .scene *::before,
+  .scene *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
