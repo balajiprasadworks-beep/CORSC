@@ -2,6 +2,7 @@
   "name": "corsc",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -14,9 +15,9 @@
     "db:validate": "prisma validate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:seed": "node --experimental-strip-types --import ./prisma/alias-loader.mjs prisma/seed.ts",
-    "db:import-formulary": "node --experimental-strip-types --import ./prisma/alias-loader.mjs prisma/import-formulary.ts",
-    "db:verify": "node --experimental-strip-types --import ./prisma/alias-loader.mjs prisma/verify-live.ts"
+    "db:seed": "node --env-file-if-exists=.env --experimental-strip-types --import ./prisma/alias-loader.mjs prisma/seed.ts",
+    "db:import-formulary": "node --env-file-if-exists=.env --experimental-strip-types --import ./prisma/alias-loader.mjs prisma/import-formulary.ts",
+    "db:verify": "node --env-file-if-exists=.env --experimental-strip-types --import ./prisma/alias-loader.mjs prisma/verify-live.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

@@ -295,7 +295,7 @@ was intended. **Prisma migrations are authoritative.** Do not apply both.
 ```bash
 git clone <repo> && cd CORSC
 npm ci                                  # runs prisma generate
-cp example.env .env.local               # then fill in DATABASE_URL and DIRECT_URL
+cp example.env .env                     # then fill in DATABASE_URL and DIRECT_URL
 
 npx prisma migrate deploy               # apply the schema
 npm run db:import-formulary             # load the medication dictionary

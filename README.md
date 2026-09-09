@@ -66,7 +66,7 @@ import.
 
 ```bash
 npm install                    # runs prisma generate
-cp example.env .env.local      # then fill in DATABASE_URL, DIRECT_URL and the Supabase values
+cp example.env .env            # then fill in DATABASE_URL, DIRECT_URL and the Supabase values
 
 npx prisma migrate deploy      # create the schema
 npm run db:import-formulary    # load the medication dictionary
@@ -87,7 +87,7 @@ Then open [http://localhost:3000](http://localhost:3000).
 
 ## Supabase authentication
 
-The app uses Supabase email/password authentication. Copy [example.env](./example.env) to `.env.local` and set the same variables in the deployment environment.
+The app uses Supabase email/password authentication. Copy [example.env](./example.env) to `.env` and set the same variables in the deployment environment.
 
 Create accounts in **Supabase Dashboard → Authentication → Users** (or invite users), with a password. A clinician profile is created on first sign-in with the least-privileged role that can still do clinical work; higher roles are granted deliberately by an administrator. Adding a record only to an application database table does not create a sign-in account.
 
